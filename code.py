@@ -22,11 +22,10 @@ SLEEP_STATE = False
 button_alarm = alarm.pin.PinAlarm(pin=board.D12, value=False, pull=True)
 
 
-async def catch_interrupt(button):
-    """Print a message when pin goes low."""
+async def catch_interrupt(pin):
     global SLEEP_STATE
 
-    with countio.Counter(button, pull=digitalio.Pull.UP) as interrupt:
+    with countio.Counter(pin, pull=digitalio.Pull.UP) as interrupt:
         while True:
             if interrupt.count > 0:
                 print("interupted")
@@ -45,15 +44,8 @@ async def catch_interrupt(button):
 
 async def main():
     interrupt_task = asyncio.create_task(catch_interrupt(board.D12))
-    # while True:
-    #     if SLEEP_STATE:
-    #         print("sleep on from main")
-    #         # alarm.exit_and_deep_sleep_until_alarms(button_alarm)
 
     await asyncio.gather(interrupt_task)
 
-
-# while True:
-#     print("button state" + str(pin12.value))
 
 asyncio.run(main())
