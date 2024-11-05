@@ -19,7 +19,7 @@ i2c_power_pin.switch_to_output(value=True)
 
 
 SLEEP_STATE = False
-button_alarm = alarm.pin.PinAlarm(pin=board.D12, value=False, pull=True)
+button_alarm = alarm.pin.PinAlarm(pin=board.D13, value=False, pull=True)
 
 
 async def catch_interrupt(pin):
@@ -43,7 +43,7 @@ async def catch_interrupt(pin):
 
 
 async def main():
-    interrupt_task = asyncio.create_task(catch_interrupt(board.D12))
+    interrupt_task = asyncio.create_task(catch_interrupt(board.D13))
 
     await asyncio.gather(interrupt_task)
 
