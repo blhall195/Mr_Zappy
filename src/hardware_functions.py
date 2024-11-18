@@ -71,8 +71,8 @@ class MrZappy:
         time.sleep(0.25)
         # Delay after UART initialization (Keep this 0.25sec delay, the code doesn't work when
         # powered by a battery otherwise)
-        laser = Laser(uart)
-        laser.set_laser(True)
+        self.laser = Laser(uart)
+        self.laser.set_laser(True)
 
     def get_calibrated_angles(self):
         azimuth, inclination, roll = self.calib.get_angles(

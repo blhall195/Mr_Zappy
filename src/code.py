@@ -144,7 +144,7 @@ splash.append(small_square_4)
 paused = False
 previous_state = fire_button.value
 
-laser.set_laser(True)
+# my_hardware.laser.set_laser(True)
 laser_on_flag = True
 
 while True:
@@ -155,7 +155,7 @@ while True:
 
         if paused:  # If paused state is entered (button pressed to pause)
             # Fetch and update laser distance only once
-            distance = laser.distance / 100
+            distance = my_hardware.laser.distance / 100
             distance_label.text = f"{distance}m"
             time.sleep(0.1)  # Small delay to prevent bouncing
             laser_on_flag = True
@@ -166,7 +166,7 @@ while True:
     if not paused:
         if laser_on_flag:
             distance_label.text = ""
-            laser.set_laser(True)
+            my_hardware.laser.set_laser(True)
             laser_on_flag = False
 
         # Fetch and update azimuth and inclination continuously when not paused
