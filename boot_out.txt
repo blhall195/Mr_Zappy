@@ -1,3 +1,0 @@
-Adafruit CircuitPython 9.1.4 on 2024-09-17; Adafruit Feather ESP32 V2 with ESP32
-Board ID:adafruit_feather_esp32_v2
-UID:8EF9D6429205
