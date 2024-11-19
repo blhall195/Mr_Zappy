@@ -50,57 +50,35 @@ grav_array = []
 # print(calibration_dict)
 
 
-# Reitialise display so the display goes to readout mode, this chunky code needs changing into a
-# class probably...
+
+class RollingValue:
+    def __init__(self, num_samples):
+        self.values = []
+        self.num_samples = num_samples
+    def add_value(self, value : float):
+        self.values.append(value)
+        if len(self.values) > self.num_samples:
+            self.values = self.values[1:]
+    def get_rolling_average(self):
+        if len(self.values)> 0:
+            total = 0
+            for value in self.values:
+                total += value
+            return total/len(self.values)
+        else:
+            return 0
 
 
-
-# Start loop
-paused = False
-# previous_state = my_hardware.fire_button.value
-
-# my_hardware.laser.set_laser(True)
-laser_on_flag = True
-
-while False:
-    current_state = not my_hardware.fire_button.value  # Active Low: pressed is False, not pressed is True
-
-    if current_state and current_state != previous_state:
-        paused = not paused  # Toggle the paused state
-
-        if paused:  # If paused state is entered (button pressed to pause)
-            # Fetch and update laser distance only once
-            distance = my_hardware.laser.distance / 100
-            my_screen.distance_label.text = f"{distance}m"
-            time.sleep(0.1)  # Small delay to prevent bouncing
-            laser_on_flag = True
-
-            # battery_percentage = read_battery_percentage(vbat_pin)
-            # my_screen.battery_label.text = f"{battery_percentage:.0f}%"
-            print(distance)
-
-    if not paused:
-        if laser_on_flag:
-            my_screen.distance_label.text = ""
-            my_hardware.laser.set_laser(True)
-            laser_on_flag = False
-
-        # Fetch and update azimuth and inclination continuously when not paused
-        angles = my_hardware.get_calibrated_angles()
-        my_screen.azimuth_label.text = f"{round(angles.azimuth, 1)}°"
-        my_screen.inclination_label.text = f"{round(angles.inclination, 1)}°"
-
-    previous_state = current_state
-    time.sleep(0.1)
-
-class ButtonStates:
+class SystemStates:
     def __init__(self):
         self.counter = 0
         self.fire_button_press = False
         self.paused = False
+        self.azimuth = RollingValue(10)
+        self.inclination = RollingValue(10)
 
 
-async def laser_firing(buttons : ButtonStates):  # Don't forget the async!
+async def laser_firing(buttons : SystemStates):  # Don't forget the async!
     while True:
         if buttons.fire_button_press:
 
@@ -116,7 +94,7 @@ async def laser_firing(buttons : ButtonStates):  # Don't forget the async!
 
         await asyncio.sleep(0.1)
 
-async def monitor_buttons(button_states : ButtonStates, hardware : MrZappy):
+async def monitor_buttons(button_states : SystemStates, hardware : MrZappy):
     """Monitor buttons that reverse direction and change animation speed.
     Assume buttons are active low.
     """
@@ -147,38 +125,36 @@ async def monitor_buttons(button_states : ButtonStates, hardware : MrZappy):
             await asyncio.sleep(0)
 
 
-class RollingValue:
-    def __init__(self):
-        self.values = []
-    def add_value(self, value : float):
-        self.values.append(value)
-        if len(self.values) > 5:
-            self.values.pop(0)
-    def get_rolling_average(self):
-        total = 0
-        for value in self.values:
-            total += value
-        return total/len(self.values)
+
+async def calc_angles(button_states:SystemStates):
+
+    while True:
+        angles = my_hardware.get_calibrated_angles()
+        button_states.azimuth.add_value(angles.azimuth)
+        button_states.inclination.add_value(angles.inclination)
+
+        await asyncio.sleep(0)
 
 
-async def display_updates(button_states:ButtonStates):
+async def display_updates(button_states:SystemStates):
     while True:
         if not button_states.paused:
-            angles = my_hardware.get_calibrated_angles()
-            my_screen.azimuth_label.text = f"{round(angles.azimuth, 1)}°"
-            my_screen.inclination_label.text = f"{round(angles.inclination, 1)}°"
+
+            my_screen.azimuth_label.text = f"{round(button_states.azimuth.get_rolling_average(), 1)}°"
+            my_screen.inclination_label.text = f"{round(button_states.inclination.get_rolling_average(), 1)}°"
 
         await asyncio.sleep(0.2)
 
 
 async def main():  # Don't forget the async!
 
-    buttons = ButtonStates()
+    buttons = SystemStates()
 
     led_task = asyncio.create_task(laser_firing(buttons))
     buttons_task = asyncio.create_task(monitor_buttons(buttons, my_hardware))
     screen_task = asyncio.create_task(display_updates(buttons))
-    await asyncio.gather(led_task, buttons_task, screen_task)
+    calc_angles_task = asyncio.create_task(calc_angles(buttons))
+    await asyncio.gather(led_task, buttons_task, screen_task,calc_angles_task)
 
     print("done")
 
