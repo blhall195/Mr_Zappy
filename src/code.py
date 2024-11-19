@@ -1,20 +1,15 @@
 import time
 
-
-
-from adafruit_displayio_sh1107 import SH1107, DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297
-import analogio
-import board
-import digitalio
-import displayio
-
 from hardware_functions import MrZappy
 from screen_hardware import ZappyScreen
-
+import digitalio
+import asyncio
+import keypad
 
 my_hardware = MrZappy()
-
 my_screen = ZappyScreen()
+
+import board
 
 # perform calibration before screen loads
 print(
@@ -62,12 +57,12 @@ grav_array = []
 
 # Start loop
 paused = False
-previous_state = my_hardware.fire_button.value
+# previous_state = my_hardware.fire_button.value
 
 # my_hardware.laser.set_laser(True)
 laser_on_flag = True
 
-while True:
+while False:
     current_state = not my_hardware.fire_button.value  # Active Low: pressed is False, not pressed is True
 
     if current_state and current_state != previous_state:
@@ -97,3 +92,95 @@ while True:
 
     previous_state = current_state
     time.sleep(0.1)
+
+class ButtonStates:
+    def __init__(self):
+        self.counter = 0
+        self.fire_button_press = False
+        self.paused = False
+
+
+async def laser_firing(buttons : ButtonStates):  # Don't forget the async!
+    while True:
+        if buttons.fire_button_press:
+
+            if not buttons.paused:
+                my_hardware.laser.set_laser(True)
+                distance = my_hardware.laser.distance / 100
+                my_screen.distance_label.text = f"{distance}m"
+            else:
+                my_screen.distance_label.text = ""
+
+            buttons.fire_button_press = False
+            buttons.paused = not buttons.paused
+
+        await asyncio.sleep(0.1)
+
+async def monitor_buttons(button_states : ButtonStates, hardware : MrZappy):
+    """Monitor buttons that reverse direction and change animation speed.
+    Assume buttons are active low.
+    """
+    with keypad.Keys(
+        (hardware.fire_button,
+         hardware.button_1,
+         hardware.button_2,
+         hardware.button_3,
+         hardware.button_4), value_when_pressed=False, pull=True
+    ) as keys:
+        while True:
+            key_event = keys.events.get()
+            if key_event is not None:
+                print(key_event)
+            if key_event and key_event.pressed:
+                key_number = key_event.key_number
+                if key_number == 0:
+                    print("pressed the button")
+                    button_states.fire_button_press = not button_states.fire_button_press
+                if key_number == 1:
+                    print("pressed the button")
+                    button_states.counter =3
+                if key_number == 2:
+                    print("pressed the button")
+                    button_states.counter =4
+
+            # Let another task run.
+            await asyncio.sleep(0)
+
+
+class RollingValue:
+    def __init__(self):
+        self.values = []
+    def add_value(self, value : float):
+        self.values.append(value)
+        if len(self.values) > 5:
+            self.values.pop(0)
+    def get_rolling_average(self):
+        total = 0
+        for value in self.values:
+            total += value
+        return total/len(self.values)
+
+
+async def display_updates(button_states:ButtonStates):
+    while True:
+        if not button_states.paused:
+            angles = my_hardware.get_calibrated_angles()
+            my_screen.azimuth_label.text = f"{round(angles.azimuth, 1)}°"
+            my_screen.inclination_label.text = f"{round(angles.inclination, 1)}°"
+
+        await asyncio.sleep(0.2)
+
+
+async def main():  # Don't forget the async!
+
+    buttons = ButtonStates()
+
+    led_task = asyncio.create_task(laser_firing(buttons))
+    buttons_task = asyncio.create_task(monitor_buttons(buttons, my_hardware))
+    screen_task = asyncio.create_task(display_updates(buttons))
+    await asyncio.gather(led_task, buttons_task, screen_task)
+
+    print("done")
+
+
+asyncio.run(main())

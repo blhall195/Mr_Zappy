@@ -46,11 +46,19 @@ class CustomAngleClass:
 
 class MrZappy:
     def __init__(self):
+
         self.laser = None
-        self.fire_button = None
+
         self.mag_sensor = None
         self.grav_sensor = None
         self.calib = None
+
+        self.fire_button = board.D13
+        self.button_1 = board.D24
+        self.button_2 =board.D23
+        self.button_3 =board.D19
+        self.button_4 =board.D25
+
         self.init_io()
 
     def init_io(self):
@@ -77,9 +85,7 @@ class MrZappy:
         self.laser.set_laser(True)
 
         # Initialise Fire Button
-        self.fire_button = digitalio.DigitalInOut(board.D13)
-        self.fire_button.direction = digitalio.Direction.INPUT
-        self.fire_button.pull = digitalio.Pull.UP
+
 
     def get_calibrated_angles(self):
         azimuth, inclination, roll = self.calib.get_angles(

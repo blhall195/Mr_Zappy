@@ -25,24 +25,6 @@ default_section = "THIRDPARTY"
 src_paths = ["src"]
 
 
-[tool.poetry]
-name = "Mr_Zappy"
-version = "0.1.0"
-description = ""
-authors = ["jgsdavies <jackdavies08@gmail.com>"]
-readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.8"
-adafruit-circuitpython-displayio-sh1107 = "^1.7.1"
-adafruit-circuitpython-display-text = "^3.2.0"
-adafruit-circuitpython-lsm6ds = "^4.5.13"
-circuitpython-laser-egismos = "^1.2.0"
-circuitpython-rm3100 = "^1.0.1"
-circuitpython-mag-cal = {git = "https://github.com/furbrain/CircuitPython_mag_cal.git"}
-asyncio = "^3.4.3"
-
-
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
