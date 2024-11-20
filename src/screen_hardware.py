@@ -1,14 +1,14 @@
-import displayio
-import board
-from adafruit_displayio_sh1107 import SH1107, DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297
-
 from adafruit_bitmap_font import bitmap_font
 from adafruit_display_text import bitmap_label as label
+from adafruit_displayio_sh1107 import SH1107, DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297
 import analogio
+import board
+import displayio
 
 # Initialize battery monitoring
 VBAT_PIN = board.VOLTAGE_MONITOR  # Adjust based on your board, if needed
 vbat_pin = analogio.AnalogIn(VBAT_PIN)
+
 
 def read_battery_percentage(vbat_pin):
     raw_value = vbat_pin.value  # Read the voltage
@@ -16,11 +16,18 @@ def read_battery_percentage(vbat_pin):
     bat_percentage = (voltage / 4.2) * 100  # Convert to battery percentage
     return bat_percentage
 
+
 class ZappyScreen:
     def __init__(self):
+        self.BT_label = None
+        self.battery_label = None
+        self.azimuth_label = None
+        self.inclination_label = None
+        self.distance_label = None
         self.font = None
         self.initialise_screen()
-
+        self.prev_azimuth = 0
+        self.prev_inclination = 0
 
     def initialise_screen(self):
         # Initialise display
@@ -79,7 +86,9 @@ class ZappyScreen:
         self.azimuth_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=78)
         self.inclination_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=112)
         battery_percentage = read_battery_percentage(vbat_pin)
-        self.battery_label = label.Label(self.font, scale=2, text=f"{battery_percentage:.0f}%", x=50, y=6)
+        self.battery_label = label.Label(
+            self.font, scale=2, text=f"{battery_percentage:.0f}%", x=50, y=6
+        )
         self.BT_label = label.Label(self.font, scale=2, text="BT", x=0, y=6)
 
         splash = displayio.Group()
@@ -95,3 +104,26 @@ class ZappyScreen:
         splash.append(small_square_2)
         splash.append(small_square_3)
         splash.append(small_square_4)
+
+    def _update_angle_if_different(
+        self, prev_value: float, new_value: float, tolerance: float, label: float
+    ) -> float:
+        difference = abs(new_value - prev_value)
+        if difference > tolerance:
+            label.text = f"{round(new_value, 1)}°"
+            return new_value
+        else:
+            return prev_value
+
+    def update_angles(self, azimuth: float, inclination: float, force_update: bool):
+        if force_update:
+            tolerance = 0
+        else:
+            tolerance = 1
+
+        self.prev_inclination = self._update_angle_if_different(
+            self.prev_inclination, inclination, tolerance, self.inclination_label
+        )
+        self.prev_azimuth = self._update_angle_if_different(
+            self.prev_azimuth, azimuth, tolerance, self.azimuth_label
+        )

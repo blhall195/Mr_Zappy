@@ -1,21 +1,17 @@
+import asyncio
 import time
 
-from hardware_functions import MrZappy
-from screen_hardware import ZappyScreen
-import digitalio
-import asyncio
 import keypad
 
-my_hardware = MrZappy()
-my_screen = ZappyScreen()
-
-import board
+from Angles import CustomAngleClass
+from main_board import MrZappy
 
 # perform calibration before screen loads
 print(
     "Carry out the initial device calibration by pressing the fire button while rotating the device"
     " around as many different positions as possible."
 )
+
 
 def take_calibration_readings(button, mag_sensor, grav_sensor, mag_array: list, grav_array: list):
     previous_state = button.value
@@ -50,60 +46,48 @@ grav_array = []
 # print(calibration_dict)
 
 
-
-class RollingValue:
-    def __init__(self, num_samples):
-        self.values = []
-        self.num_samples = num_samples
-    def add_value(self, value : float):
-        self.values.append(value)
-        if len(self.values) > self.num_samples:
-            self.values = self.values[1:]
-    def get_rolling_average(self):
-        if len(self.values)> 0:
-            total = 0
-            for value in self.values:
-                total += value
-            return total/len(self.values)
-        else:
-            return 0
-
-
 class SystemStates:
     def __init__(self):
         self.counter = 0
         self.fire_button_press = False
         self.paused = False
-        self.azimuth = RollingValue(10)
-        self.inclination = RollingValue(10)
+        self.angles = CustomAngleClass()
 
 
-async def laser_firing(buttons : SystemStates):  # Don't forget the async!
+async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don't forget the async!
     while True:
-        if buttons.fire_button_press:
-
-            if not buttons.paused:
+        if system_state.fire_button_press:
+            if not system_state.paused:
                 my_hardware.laser.set_laser(True)
                 distance = my_hardware.laser.distance / 100
-                my_screen.distance_label.text = f"{distance}m"
-            else:
-                my_screen.distance_label.text = ""
+                my_hardware.screen.distance_label.text = f"{distance}m"
 
-            buttons.fire_button_press = False
-            buttons.paused = not buttons.paused
+                azimuth, inclination, _ = system_state.angles.get_avg_value()
+                my_hardware.screen.update_angles(azimuth, inclination, True)
+
+            else:
+                my_hardware.screen.distance_label.text = ""
+
+            system_state.fire_button_press = False
+            system_state.paused = not system_state.paused
 
         await asyncio.sleep(0.1)
 
-async def monitor_buttons(button_states : SystemStates, hardware : MrZappy):
+
+async def monitor_buttons(button_states: SystemStates, hardware: MrZappy):
     """Monitor buttons that reverse direction and change animation speed.
     Assume buttons are active low.
     """
     with keypad.Keys(
-        (hardware.fire_button,
-         hardware.button_1,
-         hardware.button_2,
-         hardware.button_3,
-         hardware.button_4), value_when_pressed=False, pull=True
+        (
+            hardware.fire_button,
+            hardware.button_1,
+            hardware.button_2,
+            hardware.button_3,
+            hardware.button_4,
+        ),
+        value_when_pressed=False,
+        pull=True,
     ) as keys:
         while True:
             key_event = keys.events.get()
@@ -112,49 +96,54 @@ async def monitor_buttons(button_states : SystemStates, hardware : MrZappy):
             if key_event and key_event.pressed:
                 key_number = key_event.key_number
                 if key_number == 0:
-                    print("pressed the button")
+                    # Fire button
                     button_states.fire_button_press = not button_states.fire_button_press
                 if key_number == 1:
-                    print("pressed the button")
-                    button_states.counter =3
+                    hardware.get_uncalibrated_angles()
                 if key_number == 2:
                     print("pressed the button")
-                    button_states.counter =4
+                    button_states.counter = 4
 
             # Let another task run.
             await asyncio.sleep(0)
 
 
-
-async def calc_angles(button_states:SystemStates):
-
+async def calc_angles(system_state: SystemStates, my_hardware: MrZappy):
     while True:
-        angles = my_hardware.get_calibrated_angles()
-        button_states.azimuth.add_value(angles.azimuth)
-        button_states.inclination.add_value(angles.inclination)
+        # azimuth, inclination, roll = my_hardware.get_calibrated_angles()
+
+        x, y, z = my_hardware.get_mag_readings()
+        system_state.angles.mag_raw.add_values(x, y, z)
+
+        x, y, z = my_hardware.get_grav_readings()
+        system_state.angles.grav_raw.add_values(x, y, z)
+
+        # system_state.angles.azimuth.add_value(azimuth)
+        # system_state.angles.inclination.add_value(inclination)
 
         await asyncio.sleep(0)
 
 
-async def display_updates(button_states:SystemStates):
+async def display_updates(system_state: SystemStates, my_hardware: MrZappy):
     while True:
-        if not button_states.paused:
-
-            my_screen.azimuth_label.text = f"{round(button_states.azimuth.get_rolling_average(), 1)}°"
-            my_screen.inclination_label.text = f"{round(button_states.inclination.get_rolling_average(), 1)}°"
+        if not system_state.paused:
+            # azimuth, inclination, roll = my_hardware.get_calibrated_angles()
+            azimuth, inclination, _ = system_state.angles.get_last_value()
+            my_hardware.screen.update_angles(azimuth, inclination, False)
 
         await asyncio.sleep(0.2)
 
 
 async def main():  # Don't forget the async!
-
     buttons = SystemStates()
 
-    led_task = asyncio.create_task(laser_firing(buttons))
+    my_hardware = MrZappy()
+
+    led_task = asyncio.create_task(laser_firing(buttons, my_hardware))
     buttons_task = asyncio.create_task(monitor_buttons(buttons, my_hardware))
-    screen_task = asyncio.create_task(display_updates(buttons))
-    calc_angles_task = asyncio.create_task(calc_angles(buttons))
-    await asyncio.gather(led_task, buttons_task, screen_task,calc_angles_task)
+    screen_task = asyncio.create_task(display_updates(buttons, my_hardware))
+    calc_angles_task = asyncio.create_task(calc_angles(buttons, my_hardware))
+    await asyncio.gather(led_task, buttons_task, screen_task, calc_angles_task)
 
     print("done")
 
