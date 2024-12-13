@@ -196,10 +196,22 @@ async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don
         await asyncio.sleep(0.1)
 
 
+
+
+import time
+
+import time
+
 async def monitor_buttons(button_states: SystemStates, hardware: MrZappy):
-    """Monitor buttons that reverse direction and change animation speed.
+    """Monitor buttons for single press and long press.
     Assume buttons are active low.
     """
+    long_press_threshold = 3  # Time in seconds for a long press
+
+    fire_button_last_press_time = None
+    fire_button_pressed = False
+    fire_button_long_pressed = False
+
     with keypad.Keys(
         (
             hardware.fire_button,
@@ -217,26 +229,51 @@ async def monitor_buttons(button_states: SystemStates, hardware: MrZappy):
                 time.sleep(0.001)
             if key_event and key_event.pressed:
                 key_number = key_event.key_number
-                if key_number == 0:
-                    # Fire button
-                    button_states.fire_button_press = not button_states.fire_button_press
-                if key_number == 1:
-                    #hardware.get_uncalibrated_angles()
-                    print("pressed button 1")
+                current_time = time.monotonic()
+
+                if key_number == 0:  # Fire button
+                    fire_button_last_press_time = current_time
+                    fire_button_pressed = True
+                    fire_button_long_pressed = False
+
+                elif key_number == 1:
+                    # Button 1
+                    print("Pressed button 1")
                     button_states.counter = 1
                     button_states.button_1_press = not button_states.button_1_press
-                if key_number == 2:
-                    print("pressed button 2")
+                elif key_number == 2:
+                    print("Pressed button 2")
                     button_states.counter = 2
                     button_states.button_2_press = not button_states.button_2_press
-                if key_number == 3:
-                    print("pressed button 3")
+                elif key_number == 3:
+                    print("Pressed button 3")
                     button_states.counter = 3
                     button_states.button_3_press = not button_states.button_3_press
 
+            # Handle fire button states
+            if fire_button_pressed:
+                elapsed_time = time.monotonic() - fire_button_last_press_time
 
-            # Let another task run.
-            await asyncio.sleep(0)
+                if elapsed_time >= long_press_threshold and not fire_button_long_pressed:
+                    # Long press detected
+                    fire_button_long_pressed = True
+                    fire_button_pressed = False  # Reset pressed state
+                    button_states.fire_button_long_press = True
+                    button_states.fire_button_press = False  # Clear single press
+                    print("Fire button long press detected!")
+
+                elif key_event and key_event.released:
+                    # Button released
+                    if elapsed_time < long_press_threshold:
+                        # Single press detected
+                        button_states.fire_button_press = True
+                        button_states.fire_button_long_press = False
+                        print("Fire button single press detected!")
+
+                    fire_button_pressed = False
+
+            # Let another task run
+            await asyncio.sleep(0.1)
 
 
 async def calc_angles(system_state: SystemStates, my_hardware: MrZappy):
