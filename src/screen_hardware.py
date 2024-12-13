@@ -4,6 +4,7 @@ from adafruit_displayio_sh1107 import SH1107, DISPLAY_OFFSET_ADAFRUIT_128x128_OL
 import analogio
 import board
 import displayio
+import random
 
 # Initialize battery monitoring
 VBAT_PIN = board.VOLTAGE_MONITOR  # Adjust based on your board, if needed
@@ -24,7 +25,9 @@ class ZappyScreen:
     def __init__(self):
         self.BT_label = None
         self.battery_label = None
+        self.small_square_4 = None
         self.azimuth_label = None
+        self.black_background = None
         self.inclination_label = None
         self.distance_label = None
         self.font = None
@@ -34,21 +37,6 @@ class ZappyScreen:
 
     def initialise_screen(self):
         # Initialise display
-
-        # Release any existing displays
-        displayio.release_displays()
-
-        self.font = bitmap_font.load_font("lib/fonts/terminal.bdf")  # Load font
-
-        i2c = board.I2C()
-        display_bus = displayio.I2CDisplay(i2c, device_address=0x3D)
-        display = SH1107(
-            display_bus,
-            width=128,
-            height=128,
-            display_offset=DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297,
-            rotation=90,
-        )
 
         displayio.release_displays()  # Release any existing displays
         self.font = bitmap_font.load_font("lib/fonts/terminal.bdf")  # Load font
@@ -77,11 +65,14 @@ class ZappyScreen:
         small_square_3 = displayio.TileGrid(
             displayio.Bitmap(3, 6, 1), pixel_shader=white_palette, x=122, y=4
         )
-        small_square_4 = displayio.TileGrid(
-            displayio.Bitmap(int(read_battery_percentage(vbat_pin) / 100 * 30), 13, 1),
+        self.small_square_4 = displayio.TileGrid(
+            displayio.Bitmap(30, 13, 1),
             pixel_shader=white_palette,
             x=91,
             y=1,
+        )
+        self.black_background = displayio.TileGrid(
+            displayio.Bitmap(128, 128, 1), pixel_shader=black_palette, x=0, y=0
         )
 
         # Create labels
@@ -89,20 +80,14 @@ class ZappyScreen:
         self.azimuth_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=78)
         self.inclination_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=112)
         battery_percentage = read_battery_percentage(vbat_pin)
-        if battery_percentage == 100:
-            self.battery_label = label.Label(
-                self.font, scale=2, text=f"{battery_percentage:.0f}%", x=40, y=6
-            )
-        else:
-            self.battery_label = label.Label(
-                self.font, scale=2, text=f"{battery_percentage:.0f}%", x=50, y=6
-            )
+        self.battery_label = label.Label(self.font, scale=2, text=f"{battery_percentage:.0f}%", x=40, y=6)
         self.BT_label = label.Label(self.font, scale=2, text="BT", x=0, y=6)
 
         splash = displayio.Group()
         display.root_group = splash  # Set the splash group as the root group
 
         # Add labels to the splash group
+        splash.append(self.black_background)
         splash.append(self.distance_label)
         splash.append(self.azimuth_label)
         splash.append(self.inclination_label)
@@ -111,7 +96,8 @@ class ZappyScreen:
         splash.append(small_square_1)
         splash.append(small_square_2)
         splash.append(small_square_3)
-        splash.append(small_square_4)
+        splash.append(self.small_square_4)
+
 
     def _update_angle_if_different(
         self, prev_value: float, new_value: float, tolerance: float, label: float
@@ -135,3 +121,45 @@ class ZappyScreen:
         self.prev_azimuth = self._update_angle_if_different(
             self.prev_azimuth, azimuth, tolerance, self.azimuth_label
         )
+
+    def update_battery_display(self):
+        """Updates the battery label to show the current battery percentage."""
+        if hasattr(self, "battery_label") and hasattr(self, "font"):
+            # Read the current battery percentage
+            battery_percentage = read_battery_percentage(vbat_pin)
+
+            # Calculate the width of the bar based on the battery percentage
+            bar_width = int(battery_percentage / 100 * 30)
+
+            # Update the existing bitmap rather than creating a new one
+            for x in range(30):  # Assuming the bitmap width is 30 pixels
+                for y in range(13):  # Assuming the bitmap height is 13 pixels
+                    if x < bar_width:
+                        self.small_square_4.bitmap[x, y] = 0  # Empty space#
+                    else:
+                        self.small_square_4.bitmap[x, y] = 1  # Fill the bar
+
+            # Update the label's text based on the current battery percentage
+            if battery_percentage == 100:
+                self.battery_label.text = f"{battery_percentage:.0f}%"
+                self.battery_label.x = 40  # Adjust position for full percentage display
+            else:
+                self.battery_label.text = f"{battery_percentage:.0f}%"
+                self.battery_label.x = 50  # Adjust for shorter percentage values
+        else:
+            # Error message if battery_label or font isn't set up properly
+            print("Error: Battery label or font is not initialized.")
+
+
+    def turn_off_screen(self):
+        """Blanks out the screen by replacing displayed content with the black background."""
+        if hasattr(self, "black_background") and hasattr(self, "display"):
+            # Create and show a new display group with only the black background
+            blank_group = displayio.Group()
+            blank_group.append(self.black_background)
+            self.display.show(blank_group)
+
+            print("Screen has been turned off (blanked out).")
+        else:
+            print("Error: Black background or display object is missing.")
+

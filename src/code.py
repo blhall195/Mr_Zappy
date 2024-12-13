@@ -60,19 +60,28 @@ async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don
             if not system_state.paused:
                 my_hardware.laser.set_laser(True)
                 distance = my_hardware.laser.distance / 100
-                my_hardware.screen.distance_label.text = f"{distance}m"
+
+                my_hardware.screen.turn_off_screen()
 
                 azimuth, inclination, _ = system_state.angles.get_avg_value()
+
+                my_hardware.screen.distance_label.text = f"{distance}m"
                 my_hardware.screen.update_angles(azimuth, inclination, True)
 
+
             else:
-                my_hardware.screen.distance_label.text = ""
+                my_hardware.screen.turn_off_screen()
+                #my_hardware.screen.distance_label.text = ""
 
             system_state.fire_button_press = False
             system_state.paused = not system_state.paused
 
         await asyncio.sleep(0.1)
 
+async def monitor_battery(my_hardware: MrZappy):
+    while True:
+        my_hardware.screen.update_battery_display()
+        await asyncio.sleep(0.5)
 
 async def monitor_buttons(button_states: SystemStates, hardware: MrZappy):
     """Monitor buttons that reverse direction and change animation speed.
@@ -149,8 +158,10 @@ async def main():  # Don't forget the async!
     led_task = asyncio.create_task(laser_firing(buttons, my_hardware))
     buttons_task = asyncio.create_task(monitor_buttons(buttons, my_hardware))
     screen_task = asyncio.create_task(display_updates(buttons, my_hardware))
+    monitor_battery_task = asyncio.create_task(monitor_battery(my_hardware))
     calc_angles_task = asyncio.create_task(calc_angles(buttons, my_hardware))
-    await asyncio.gather(led_task, buttons_task, screen_task, calc_angles_task)
+
+    await asyncio.gather(led_task, buttons_task, screen_task, calc_angles_task,monitor_battery_task)
 
     print("done")
 
