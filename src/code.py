@@ -1,17 +1,20 @@
 import asyncio
 import time
-
+import board
+import neopixel
 import keypad
 
 from Angles import CustomAngleClass
 from main_board import MrZappy
+#from mag_cal.calibration import Calibration
 
-# perform calibration before screen loads
-
-
+pixel_pin = board.NEOPIXEL  # use `board.D6` for external NeoPixel
+num_pixels = 1 # Define the number of NeoPixels (1 if built-in single pixel)
+pixels = neopixel.NeoPixel(pixel_pin, num_pixels, brightness=1, auto_write=False)# Create the NeoPixel object
 
 def take_calibration_readings(button, mag_sensor, grav_sensor, mag_array: list, grav_array: list, my_hardware: MrZappy):
     my_hardware.screen.release_display()
+    my_hardware.laser.set_laser(False)
     previous_state = button.value
     iteration = 0
     while iteration < 20:
@@ -26,9 +29,27 @@ def take_calibration_readings(button, mag_sensor, grav_sensor, mag_array: list, 
         previous_state = current_state
         time.sleep(0.1)
 
+# Helper function to convert HSV to RGB
+def hsv_to_rgb(h, s, v):
+    i = int(h * 6)  # assuming h is in [0, 1), and s, v are in [0, 1]
+    f = h * 6 - i
+    p = v * (1 - s)
+    q = v * (1 - f * s)
+    t = v * (1 - (1 - f) * s)
+    i = i % 6
+    if i == 0:
+        return int(v * 255), int(t * 255), int(p * 255)
+    if i == 1:
+        return int(q * 255), int(v * 255), int(p * 255)
+    if i == 2:
+        return int(p * 255), int(v * 255), int(t * 255)
+    if i == 3:
+        return int(p * 255), int(q * 255), int(v * 255)
+    if i == 4:
+        return int(t * 255), int(p * 255), int(v * 255)
+    if i == 5:
+        return int(v * 255), int(p * 255), int(q * 255)
 
-mag_array = []
-grav_array = []
 
 # take_calibration_readings(fire_button, mag_sensor, grav_sensor, mag_array, grav_array)
 # mag_accuracy, grav_accuracy = calib.fit_ellipsoid(mag_array, grav_array)
@@ -53,22 +74,66 @@ class SystemStates:
         self.button_3_press = False
         self.paused = False
         self.calibration_active = False
+        self.rainbow_active = False
         self.angles = CustomAngleClass()
 
 
+# Async rainbow effect function
+async def rainbow_effect(system_state: SystemStates,pixels):
+    try:
+        while True:
+            for j in range(0, 360, 10):  # Go through 360 hue values
+                hue = j / 360.0  # Normalize to 0-1
+                color = hsv_to_rgb(hue, 1.0, 1.0)  # Full saturation and brightness
+                pixels.fill(color)
+                pixels.show()
+                await asyncio.sleep(0.01)  # Non-blocking delay for smooth transition
+    except asyncio.CancelledError:
+        # Handle task cancellation gracefully
+        pixels.fill((0, 0, 0))
+        pixels.show()
+
+
+# Async function to monitor the button and toggle the rainbow effect
+async def monitor_disco_button(system_state: SystemStates, pixels):
+    rainbow_task = None
+    while True:
+        if system_state.button_2_press:  # Check if button 2 is pressed
+            system_state.button_2_press = False  # Reset button press state
+            system_state.rainbow_active = not system_state.rainbow_active  # Toggle the rainbow state
+            if system_state.rainbow_active:
+                print("Starting rainbow effect...")
+                if rainbow_task:  # Ensure any previous task is canceled
+                    rainbow_task.cancel()
+                    try:
+                        await rainbow_task
+                    except asyncio.CancelledError:
+                        pass
+                rainbow_task = asyncio.create_task(rainbow_effect(system_state, pixels))
+            else:
+                print("Stopping rainbow effect...")
+                if rainbow_task:
+                    rainbow_task.cancel()
+                    try:
+                        await rainbow_task
+                    except asyncio.CancelledError:
+                        pass
+        await asyncio.sleep(0.05)  # Debounce delay
 
 
 async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):  # Don't forget the async!
     while True:
         if system_state.button_1_press:
+            #calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
             system_state.calibration_active = True
             my_hardware.screen.release_display()
+            mag_array = []
+            grav_array = []
             print("Carry out the initial device calibration by pressing the fire button while rotating the device"
                   " around as many different positions as possible.")
             iteration = 0
             while iteration < 20:
                 if system_state.fire_button_press:  # Check for a transition from not-pressed to pressed
-                    await asyncio.sleep(0.01)
                     iteration += 1
                     # Collect readings from sensors
                     mag_array.append(my_hardware.get_mag_readings())
@@ -76,7 +141,10 @@ async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):
                     print(iteration)
                     system_state.fire_button_press = False
                 await asyncio.sleep(0.1)
-        await asyncio.sleep(0.1)
+        #mag_accuracy, grav_accuracy = calib.fit_ellipsoid(mag_array, grav_array)
+        #print(mag_accuracy, grav_accuracy)
+        system_state.calibration_active = False
+        await asyncio.sleep(0.1)#
 
 
 
@@ -161,7 +229,7 @@ async def calc_angles(system_state: SystemStates, my_hardware: MrZappy):
         # azimuth, inclination, roll = my_hardware.get_calibrated_angles()
 
         x, y, z = my_hardware.get_mag_readings()
-        system_state.angles.mag_raw.add_values(x, y, z)
+        system_state.angles.mag_raw.add_values(x, y, z)#
 
         x, y, z = my_hardware.get_grav_readings()
         system_state.angles.grav_raw.add_values(x, y, z)
@@ -193,8 +261,10 @@ async def main():  # Don't forget the async!
     monitor_battery_task = asyncio.create_task(monitor_battery(my_hardware))
     calc_angles_task = asyncio.create_task(calc_angles(buttons, my_hardware))
     preform_calibration_task = asyncio.create_task(preform_calibration(buttons, my_hardware))
+    monitor_disco_button_task = asyncio.create_task(monitor_disco_button(buttons, pixels))
 
-    await asyncio.gather(led_task, buttons_task, screen_task, calc_angles_task,monitor_battery_task,preform_calibration_task)
+
+    await asyncio.gather(led_task, buttons_task, screen_task, calc_angles_task,monitor_battery_task,preform_calibration_task,monitor_disco_button_task)
 
     print("done")
 
