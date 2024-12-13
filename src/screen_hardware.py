@@ -12,8 +12,11 @@ vbat_pin = analogio.AnalogIn(VBAT_PIN)
 
 def read_battery_percentage(vbat_pin):
     raw_value = vbat_pin.value  # Read the voltage
-    voltage = ((raw_value / 65535) * 3.3) * 2
-    bat_percentage = (voltage / 4.2) * 100  # Convert to battery percentage
+    if raw_value > 40000:
+        bat_percentage = 100
+    else:
+        bat_percentage = ((raw_value-34000)/6000)*100  # Convert to battery percentage
+        bat_percentage = round(bat_percentage, 1)
     return bat_percentage
 
 
@@ -86,9 +89,14 @@ class ZappyScreen:
         self.azimuth_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=78)
         self.inclination_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=112)
         battery_percentage = read_battery_percentage(vbat_pin)
-        self.battery_label = label.Label(
-            self.font, scale=2, text=f"{battery_percentage:.0f}%", x=50, y=6
-        )
+        if battery_percentage == 100:
+            self.battery_label = label.Label(
+                self.font, scale=2, text=f"{battery_percentage:.0f}%", x=40, y=6
+            )
+        else:
+            self.battery_label = label.Label(
+                self.font, scale=2, text=f"{battery_percentage:.0f}%", x=50, y=6
+            )
         self.BT_label = label.Label(self.font, scale=2, text="BT", x=0, y=6)
 
         splash = displayio.Group()
