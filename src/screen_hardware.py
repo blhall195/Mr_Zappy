@@ -30,6 +30,7 @@ class ZappyScreen:
         self.black_background = None
         self.inclination_label = None
         self.distance_label = None
+        self.display = None
         self.font = None
         self.initialise_screen()
         self.prev_azimuth = 0
@@ -186,5 +187,21 @@ class ZappyScreen:
         else:
             print("Error: Display or black_background is not initialized.")
 
+    def release_display(self):
+        """Releases the display resources, this is done during calibration so we can use print statements instead"""
+        if hasattr(self, "display") and self.display is not None:
+            displayio.release_displays()  # Release the display resources
+            self.font = bitmap_font.load_font("lib/fonts/terminal.bdf")  # Load font
+
+            i2c = board.I2C()
+            display_bus = displayio.I2CDisplay(i2c, device_address=0x3D)
+            self.display = SH1107(
+                display_bus,
+                width=128,
+                height=128,
+                display_offset=DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297,
+                rotation=90,
+            )
+            self.display = None  # Set the display instance to None
 
 
