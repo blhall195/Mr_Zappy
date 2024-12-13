@@ -205,3 +205,30 @@ class ZappyScreen:
             self.display = None  # Set the display instance to None
 
 
+    def show_bt_label(self):
+        """Show the BT label on the screen."""
+        if hasattr(self, "BT_label") and hasattr(self, "display"):
+            root_group = self.display.root_group
+            if self.BT_label not in root_group:
+                root_group.append(self.BT_label)  # Add the BT label
+                self.display.root_group = root_group  # Refresh the display
+                print("BT label is now visible.")
+            else:
+                print("BT label is already visible.")
+        else:
+            print("Error: BT label or display is not initialized.")
+
+    def hide_bt_label(self):
+        """Hide the BT label from the screen."""
+        if hasattr(self, "BT_label") and hasattr(self, "display"):
+            root_group = self.display.root_group
+            if self.BT_label in root_group:
+                root_group.remove(self.BT_label)  # Remove the BT label
+                self.display.root_group = root_group  # Refresh the display
+                print("BT label is now hidden.")
+            else:
+                print("BT label is already hidden.")
+        else:
+            print("Error: BT label or display is not initialized.")
+
+

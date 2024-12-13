@@ -124,7 +124,9 @@ async def monitor_disco_button(system_state: SystemStates, pixels):
 async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):  # Don't forget the async!
     while True:
         if system_state.button_1_press:
-            #calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
+            # Reset the button state to avoid re-triggering immediately
+            system_state.button_1_press = False  # Reset button press state
+            my_hardware.laser.set_laser(False)
             system_state.calibration_active = True
             my_hardware.screen.release_display()
             mag_array = []
@@ -132,7 +134,16 @@ async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):
             print("Carry out the initial device calibration by pressing the fire button while rotating the device"
                   " around as many different positions as possible.")
             iteration = 0
+
             while iteration < 20:
+                # Check if button 1 is pressed again to exit the calibration loop
+                if system_state.button_1_press:
+                    print("Calibration process cancelled.")
+                    system_state.calibration_active = False  # Set calibration state to inactive
+                    system_state.button_1_press = False  # Reset the button state
+                    my_hardware.screen.initialise_screen()
+                    break  # Exit the function
+
                 if system_state.fire_button_press:  # Check for a transition from not-pressed to pressed
                     iteration += 1
                     # Collect readings from sensors
@@ -141,17 +152,20 @@ async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):
                     print(iteration)
                     system_state.fire_button_press = False
                 await asyncio.sleep(0.1)
-        #mag_accuracy, grav_accuracy = calib.fit_ellipsoid(mag_array, grav_array)
-        #print(mag_accuracy, grav_accuracy)
-        system_state.calibration_active = False
-        await asyncio.sleep(0.1)#
+
+            # Calibration process is complete
+            # mag_accuracy, grav_accuracy = calib.fit_ellipsoid(mag_array, grav_array)
+            # print(mag_accuracy, grav_accuracy)
+            system_state.calibration_active = False
+
+        await asyncio.sleep(0.1)
 
 
 
 async def monitor_battery(my_hardware: MrZappy):
     while True:
         my_hardware.screen.update_battery_display()
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(30)
 
 
 async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don't forget the async!
@@ -163,6 +177,7 @@ async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don
         if system_state.fire_button_press:
             if not system_state.paused:
                 my_hardware.laser.set_laser(True)
+                my_hardware.screen.hide_bt_label()
                 distance = my_hardware.laser.distance / 100
                 my_hardware.screen.turn_off_screen() # Turns off the screen to prevent mag sensor interference
 
