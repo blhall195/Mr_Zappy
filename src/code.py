@@ -99,9 +99,16 @@ async def monitor_buttons(button_states: SystemStates, hardware: MrZappy):
                     # Fire button
                     button_states.fire_button_press = not button_states.fire_button_press
                 if key_number == 1:
-                    hardware.get_uncalibrated_angles()
+                    #hardware.get_uncalibrated_angles()
+                    print("pressed button 1")
                 if key_number == 2:
-                    print("pressed the button")
+                    print("pressed button 2")
+                    button_states.counter = 4
+                if key_number == 3:
+                    print("pressed button 3")
+                    button_states.counter = 4
+                if key_number == 4:
+                    print("pressed button 4")
                     button_states.counter = 4
 
             # Let another task run.
