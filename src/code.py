@@ -60,18 +60,16 @@ async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don
             if not system_state.paused:
                 my_hardware.laser.set_laser(True)
                 distance = my_hardware.laser.distance / 100
-
-                my_hardware.screen.turn_off_screen()
+                my_hardware.screen.turn_off_screen() # Turns off the screen to prevent mag sensor interference
 
                 azimuth, inclination, _ = system_state.angles.get_avg_value()
 
+                my_hardware.screen.turn_on_screen() #Turns the screen back on after taking azimuth, inclination readings
                 my_hardware.screen.distance_label.text = f"{distance}m"
                 my_hardware.screen.update_angles(azimuth, inclination, True)
 
-
             else:
-                my_hardware.screen.turn_off_screen()
-                #my_hardware.screen.distance_label.text = ""
+                my_hardware.screen.distance_label.text = ""
 
             system_state.fire_button_press = False
             system_state.paused = not system_state.paused

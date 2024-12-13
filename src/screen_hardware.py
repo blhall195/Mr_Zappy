@@ -4,7 +4,7 @@ from adafruit_displayio_sh1107 import SH1107, DISPLAY_OFFSET_ADAFRUIT_128x128_OL
 import analogio
 import board
 import displayio
-import random
+import time
 
 # Initialize battery monitoring
 VBAT_PIN = board.VOLTAGE_MONITOR  # Adjust based on your board, if needed
@@ -34,6 +34,7 @@ class ZappyScreen:
         self.initialise_screen()
         self.prev_azimuth = 0
         self.prev_inclination = 0
+        self.screen_off = False
 
     def initialise_screen(self):
         # Initialise display
@@ -43,7 +44,7 @@ class ZappyScreen:
 
         i2c = board.I2C()
         display_bus = displayio.I2CDisplay(i2c, device_address=0x3D)
-        display = SH1107(
+        self.display = SH1107(
             display_bus,
             width=128,
             height=128,
@@ -84,7 +85,7 @@ class ZappyScreen:
         self.BT_label = label.Label(self.font, scale=2, text="BT", x=0, y=6)
 
         splash = displayio.Group()
-        display.root_group = splash  # Set the splash group as the root group
+        self.display.root_group = splash  # Set the splash group as the root group
 
         # Add labels to the splash group
         splash.append(self.black_background)
@@ -150,16 +151,40 @@ class ZappyScreen:
             # Error message if battery_label or font isn't set up properly
             print("Error: Battery label or font is not initialized.")
 
-
     def turn_off_screen(self):
-        """Blanks out the screen by replacing displayed content with the black background."""
-        if hasattr(self, "black_background") and hasattr(self, "display"):
-            # Create and show a new display group with only the black background
-            blank_group = displayio.Group()
-            blank_group.append(self.black_background)
-            self.display.show(blank_group)
+        """Turns off the screen by overlaying the black background."""
+        if hasattr(self, "display") and hasattr(self, "black_background"):
+            root_group = self.display.root_group
 
-            print("Screen has been turned off (blanked out).")
+            # Add the black background (if not already added)
+            if not self.screen_off:
+                if root_group and self.black_background not in root_group:
+                    root_group.append(self.black_background)  # Add black background
+                self.display.root_group = root_group  # Refresh the display
+                self.screen_off = True  # Update the state
+                time.sleep(1)#sleeps for a moment to give the screen time to turn off
+                print("Screen has been turned off.")
+            else:
+                print("Screen is already turned off.")
         else:
-            print("Error: Black background or display object is missing.")
+            print("Error: Display or black_background is not initialized.")
+
+    def turn_on_screen(self):
+        """Turns the screen back on by removing the black background."""
+        if hasattr(self, "display") and hasattr(self, "black_background"):
+            root_group = self.display.root_group
+
+            # Remove the black background (if it exists)
+            if self.screen_off:
+                if root_group and self.black_background in root_group:
+                    root_group.remove(self.black_background)  # Remove black background
+                self.display.root_group = root_group  # Refresh the display
+                self.screen_off = False  # Update the state
+                print("Screen has been turned back on.")
+            else:
+                print("Screen is already turned on.")
+        else:
+            print("Error: Display or black_background is not initialized.")
+
+
 
