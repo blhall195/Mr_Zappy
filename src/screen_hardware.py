@@ -163,7 +163,7 @@ class ZappyScreen:
                     root_group.append(self.black_background)  # Add black background
                 self.display.root_group = root_group  # Refresh the display
                 self.screen_off = True  # Update the state
-                time.sleep(1)#sleeps for a moment to give the screen time to turn off
+                time.sleep(0.5)#sleeps for a moment to give the screen time to turn off
                 print("Screen has been turned off.")
             else:
                 print("Screen is already turned off.")

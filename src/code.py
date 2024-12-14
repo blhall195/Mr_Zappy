@@ -98,8 +98,8 @@ async def rainbow_effect(system_state: SystemStates,pixels):
 async def monitor_disco_button(system_state: SystemStates, pixels):
     rainbow_task = None
     while True:
-        if system_state.button_2_press:  # Check if button 2 is pressed
-            system_state.button_2_press = False  # Reset button press state
+        if system_state.button_3_press:  # Check if button 2 is pressed
+            system_state.button_3_press = False  # Reset button press state
             system_state.rainbow_active = not system_state.rainbow_active  # Toggle the rainbow state
             if system_state.rainbow_active:
                 print("Starting rainbow effect...")
@@ -176,8 +176,7 @@ async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don
             continue
         if system_state.fire_button_press:
             if not system_state.paused:
-                my_hardware.laser.set_laser(True)
-                my_hardware.screen.hide_bt_label()
+
                 distance = my_hardware.laser.distance / 100
                 my_hardware.screen.turn_off_screen() # Turns off the screen to prevent mag sensor interference
 
@@ -186,27 +185,23 @@ async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don
                 my_hardware.screen.turn_on_screen() #Turns the screen back on after taking azimuth, inclination readings
                 my_hardware.screen.distance_label.text = f"{distance}m"
                 my_hardware.screen.update_angles(azimuth, inclination, True)
+                #my_hardware.laser.set_laser(False)
+
 
             else:
                 my_hardware.screen.distance_label.text = ""
-
+                my_hardware.laser.set_laser(True)
             system_state.fire_button_press = False
             system_state.paused = not system_state.paused
 
         await asyncio.sleep(0.1)
 
 
-
-
-import time
-
-import time
-
 async def monitor_buttons(button_states: SystemStates, hardware: MrZappy):
     """Monitor buttons for single press and long press.
     Assume buttons are active low.
     """
-    long_press_threshold = 3  # Time in seconds for a long press
+    long_press_threshold = 2  # Time in seconds for a long press
 
     fire_button_last_press_time = None
     fire_button_pressed = False
