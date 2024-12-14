@@ -35,20 +35,6 @@ def hsv_to_rgb(h, s, v):
         return int(v * 255), int(p * 255), int(q * 255)
 
 
-# take_calibration_readings(fire_button, mag_sensor, grav_sensor, mag_array, grav_array)
-# mag_accuracy, grav_accuracy = calib.fit_ellipsoid(mag_array, grav_array)
-# runs = calib.find_similar_shots(mag_array, grav_array)
-# paired_data = [(mag_array[a:b], grav_array[a:b]) for a, b in runs]
-# calib.fit_to_axis(paired_data)
-# print(runs)
-
-# print('mag_acc: ', mag_accuracy)
-# print('grav_acc: ', grav_accuracy)
-# paired_data = list(zip(mag_array, grav_array))
-# calibration_dict = calib.as_dict()
-# print(calibration_dict)
-
-
 class SystemStates:
     def __init__(self):
         self.counter = 0
@@ -187,7 +173,6 @@ async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):
             # calib.fit_to_axis(paired_data)
             # print(runs)
         await asyncio.sleep(0.1)
-
 
 
 async def monitor_battery(my_hardware: MrZappy):
@@ -336,8 +321,5 @@ async def main():  # Don't forget the async!
 
 
     await asyncio.gather(led_task, buttons_task, screen_task, calc_angles_task,monitor_battery_task,preform_calibration_task,monitor_disco_button_task)
-
-    print("done")
-
 
 asyncio.run(main())
