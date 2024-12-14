@@ -3,6 +3,7 @@ import time
 import board
 import neopixel
 import keypad
+from laser_egismos import BadReadingError
 
 from Angles import CustomAngleClass
 from main_board import MrZappy
@@ -11,23 +12,6 @@ from main_board import MrZappy
 pixel_pin = board.NEOPIXEL  # use `board.D6` for external NeoPixel
 num_pixels = 1 # Define the number of NeoPixels (1 if built-in single pixel)
 pixels = neopixel.NeoPixel(pixel_pin, num_pixels, brightness=1, auto_write=False)# Create the NeoPixel object
-
-def take_calibration_readings(button, mag_sensor, grav_sensor, mag_array: list, grav_array: list, my_hardware: MrZappy):
-    my_hardware.screen.release_display()
-    my_hardware.laser.set_laser(False)
-    previous_state = button.value
-    iteration = 0
-    while iteration < 20:
-        current_state = not button.value
-        if current_state and current_state != previous_state:
-            time.sleep(0.01)
-            iteration += 1
-            # Collect readings from sensors
-            mag_array.append(mag_sensor.magnetic)
-            grav_array.append(grav_sensor.acceleration)
-            print(iteration)
-        previous_state = current_state
-        time.sleep(0.1)
 
 # Helper function to convert HSV to RGB
 def hsv_to_rgb(h, s, v):
@@ -131,11 +115,48 @@ async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):
             my_hardware.screen.release_display()
             mag_array = []
             grav_array = []
+
             print("Carry out the initial device calibration by pressing the fire button while rotating the device"
                   " around as many different positions as possible.")
+
             iteration = 0
 
             while iteration < 20:
+                # Check if button 1 is pressed again to exit the calibration loop
+                if system_state.button_1_press:
+                    print("Calibration process cancelled.")
+                    system_state.calibration_active = False  # Set calibration state to inactive
+                    system_state.fire_button_press = False  # Reset fire button state
+                    system_state.button_1_press = False  # Reset the button state
+                    my_hardware.screen.initialise_screen()
+                    break
+
+                if system_state.fire_button_press:  # Check for a transition from not-pressed to pressed
+                    if system_state.calibration_active:
+                        iteration += 1
+                        # Collect readings from sensors
+                        mag_array.append(my_hardware.get_mag_readings())
+                        grav_array.append(my_hardware.get_grav_readings())
+                        print(iteration)
+                        system_state.fire_button_press = False
+                    else:
+                        break
+                await asyncio.sleep(0.1)
+
+            # Calibration process is complete
+            # mag_accuracy, grav_accuracy = calib.fit_ellipsoid(mag_array, grav_array)
+            # print(mag_accuracy, grav_accuracy)
+            await asyncio.sleep(0.1)
+
+            mag_array = []
+            grav_array = []
+
+            print("Now align the laser, take two sets of 8 readings in different directions rotating the"
+            "laser around a fixed position from a distance")
+
+            iteration = 0
+
+            while iteration < 16:
                 # Check if button 1 is pressed again to exit the calibration loop
                 if system_state.button_1_press:
                     print("Calibration process cancelled.")
@@ -145,19 +166,26 @@ async def preform_calibration(system_state: SystemStates, my_hardware: MrZappy):
                     break  # Exit the function
 
                 if system_state.fire_button_press:  # Check for a transition from not-pressed to pressed
-                    iteration += 1
-                    # Collect readings from sensors
-                    mag_array.append(my_hardware.get_mag_readings())
-                    grav_array.append(my_hardware.get_grav_readings())
-                    print(iteration)
-                    system_state.fire_button_press = False
+                    if system_state.calibration_active:
+                        iteration += 1
+                        # Collect readings from sensors
+                        mag_array.append(my_hardware.get_mag_readings())
+                        grav_array.append(my_hardware.get_grav_readings())
+                        print(iteration)
+                        system_state.fire_button_press = False
+                    else:
+                        break
                 await asyncio.sleep(0.1)
 
-            # Calibration process is complete
-            # mag_accuracy, grav_accuracy = calib.fit_ellipsoid(mag_array, grav_array)
-            # print(mag_accuracy, grav_accuracy)
-            system_state.calibration_active = False
 
+            print("Calibration process complete")
+            system_state.calibration_active = False  # Set calibration state to inactive
+            my_hardware.screen.initialise_screen()
+
+            # runs = calib.find_similar_shots(mag_array, grav_array)
+            # paired_data = [(mag_array[a:b], grav_array[a:b]) for a, b in runs]
+            # calib.fit_to_axis(paired_data)
+            # print(runs)
         await asyncio.sleep(0.1)
 
 
@@ -176,24 +204,20 @@ async def laser_firing(system_state: SystemStates, my_hardware: MrZappy):  # Don
             continue
         if system_state.fire_button_press:
             if not system_state.paused:
-
-                distance = my_hardware.laser.distance / 100
-                my_hardware.screen.turn_off_screen() # Turns off the screen to prevent mag sensor interference
-
-                azimuth, inclination, _ = system_state.angles.get_avg_value()
-
-                my_hardware.screen.turn_on_screen() #Turns the screen back on after taking azimuth, inclination readings
-                my_hardware.screen.distance_label.text = f"{distance}m"
-                my_hardware.screen.update_angles(azimuth, inclination, True)
-                #my_hardware.laser.set_laser(False)
-
-
+                try:
+                    distance = my_hardware.laser.distance / 100
+                    my_hardware.screen.distance_label.text = f"{distance}m"
+                    my_hardware.screen.turn_off_screen()  # Turns off the screen to prevent mag sensor interference
+                    azimuth, inclination, _ = system_state.angles.get_avg_value()
+                    my_hardware.screen.turn_on_screen()  # Turns the screen back on after taking azimuth, inclination readings
+                    my_hardware.screen.update_angles(azimuth, inclination, True)
+                except BadReadingError as e:
+                    my_hardware.screen.distance_label.text = "ERROR"
             else:
                 my_hardware.screen.distance_label.text = ""
                 my_hardware.laser.set_laser(True)
             system_state.fire_button_press = False
             system_state.paused = not system_state.paused
-
         await asyncio.sleep(0.1)
 
 
@@ -263,7 +287,7 @@ async def monitor_buttons(button_states: SystemStates, hardware: MrZappy):
                         # Single press detected
                         button_states.fire_button_press = True
                         button_states.fire_button_long_press = False
-                        print("Fire button single press detected!")
+                        #print("Fire button single press detected!")
 
                     fire_button_pressed = False
 
