@@ -15,6 +15,7 @@ class DisplayManager:
         display_bus = displayio.I2CDisplay(i2c, device_address=0x3d)
         self.display = SH1107(display_bus, width=128, height=128, display_offset=DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297, rotation=180)
 
+    def display_screen_initialise(self):
         # Swapped black and white palettes
         self.black_palette = displayio.Palette(1)
         self.black_palette[0] = 0x000000  # Black for filled portion of battery

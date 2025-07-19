@@ -9,7 +9,7 @@ import rm3100
 class SensorManager:
     def __init__(self):
         # Enable laser power
-        self.laser_power = digitalio.DigitalInOut(board.D5)
+        self.laser_power = digitalio.DigitalInOut(board.A2)
         self.laser_power.switch_to_output(False)
         time.sleep(0.3)
         self.laser_power.switch_to_output(True)
@@ -26,6 +26,7 @@ class SensorManager:
         # Initialize mag_sensor
         self.mag_sensor = rm3100.RM3100_I2C(i2c, i2c_address=0x20)
 
+    #laser stuff
     def get_distance(self):
         """Get the current distance reading from the laser, with error handling."""
         try:
@@ -34,6 +35,24 @@ class SensorManager:
             print(f"Error reading distance: {e}")
             return "Err"
 
+    def set_laser(self, value: bool):
+        """Enable or disable the laser emitter."""
+        try:
+            return self.laser.set_laser(value)
+        except Exception as e:
+            print(f"Error setting laser state: {e}")
+            return "Err"
+
+
+    def set_buzzer(self, value: bool):
+        """Enable or disable the buzzer."""
+        try:
+            return self.laser.set_buzzer(value)
+        except Exception as e:
+            print(f"Error setting buzzer state: {e}")
+            return None
+
+    #orientation stuff
     def get_grav(self):
         """Get the current grav reading from the accelerometer."""
         return self.grav_sensor.acceleration

@@ -24,7 +24,7 @@ display_bus = displayio.I2CDisplay(i2c, device_address=0x3d)
 # Width, height and rotation for Monochrome 1.12" 128x128 OLED
 WIDTH = 128
 HEIGHT = 128
-ROTATION = 90
+ROTATION = 0
 BORDER = 2
 
 display = SH1107(

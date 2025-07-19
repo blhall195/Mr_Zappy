@@ -39,8 +39,7 @@ class DiscoMode:
         if not self.is_active:
             self.is_active = True
             print("Disco Mode ON")
-            # Run the disco effect in a background task
-            self.loop.create_task(self._run_disco_effect())
+            self.task = self.loop.create_task(self._run_disco_effect())
 
     def off(self):
         """Stop the disco mode synchronously."""
