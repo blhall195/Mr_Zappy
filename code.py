@@ -16,9 +16,11 @@ button_manager = ButtonManager()
 display = DisplayManager()
 ble = BleManager()
 
+# Temp calibration dict for development/testing
+calibration_dict = {'mag': {'axes': '-X-Y-Z', 'transform': [[0.0231683, -4.50966e-05, -0.000208465], [-4.50968e-05, 0.0233006, -2.46289e-05], [-0.000208464, -2.46296e-05, 0.0231333]], 'centre': [0.407859, -1.9058, 2.11295], 'rbfs': [], 'field_avg': None, 'field_std': None}, 'dip_avg': None, 'grav': {'axes': '-Y-X+Z', 'transform': [[0.101454, 0.00155312, -0.000734401], [0.00155312, 0.101232, 0.00149594], [-0.000734397, 0.00149594, 0.0987455]], 'centre': [0.364566, -0.0656354, 0.193454], 'rbfs': [], 'field_avg': None, 'field_std': None}}
 
-# Monitor states of things between async functions
-class States:
+# A class for storing device readings
+class Readings:
     def __init__(self):
         self.azimuth = 0
         self.inclination = 0
@@ -26,47 +28,78 @@ class States:
         self.distance = 0
         self.calib_updated = None
 
+readings = Readings()
 
-device_states = States()
+# Update calib from the dictionary
+readings.calib_updated = calib.from_dict(calibration_dict)
 
+#class for storing system states
+class SystemState():
+    IDLE = "IDLE"
+    TAKING_MEASURMENT = "TAKING_MEASURMENT"
+    CALIBRATING = "CALIBRATING"
 
-def update_az_inc(states):
-    try:
-        states.azimuth, states.inclination, states.roll = states.calib_updated.get_angles(
-            sensor_manager.get_mag(), sensor_manager.get_grav()
-        )
-        print(f"({states.azimuth})")
+system_state = SystemState()
 
-    except Exception as e:
-        print(e)
+#class for updating system states
+class DeviceContext:
+    def __init__(self):
+        self.current_state = SystemState.IDLE
+        self.readings = Readings()
+        self.measurement_taken = False  # NEW FLAG
 
+device = DeviceContext()
 
-async def sensor_read_display_update(states):
-    # Use a new variable name for the updated calib data
-    calibration_dict = {'mag': {'axes': '-X-Y-Z', 'transform': [[0.0231683, -4.50966e-05, -0.000208465], [-4.50968e-05, 0.0233006, -2.46289e-05], [-0.000208464, -2.46296e-05, 0.0231333]], 'centre': [0.407859, -1.9058, 2.11295], 'rbfs': [], 'field_avg': None, 'field_std': None}, 'dip_avg': None, 'grav': {'axes': '-Y-X+Z', 'transform': [[0.101454, 0.00155312, -0.000734401], [0.00155312, 0.101232, 0.00149594], [-0.000734397, 0.00149594, 0.0987455]], 'centre': [0.364566, -0.0656354, 0.193454], 'rbfs': [], 'field_avg': None, 'field_std': None}}
+device.current_state = SystemState.IDLE
+print(device.current_state)
 
-    # Update calib from the dictionary
-    states.calib_updated = calib.from_dict(calibration_dict)
+async def sensor_read_display_update(readings, device):
     while True:
-        update_az_inc(states)
-        display.update_sensor_readings(0, states.azimuth, states.inclination)
-        await asyncio.sleep(.5)
+        if device.current_state == SystemState.IDLE:
+            update_readings(readings)
+            display.update_sensor_readings(0, readings.azimuth, readings.inclination)
+
+        elif device.current_state == SystemState.TAKING_MEASURMENT:
+            # Only take reading once when entering the state
+            if not device.measurement_taken:
+                update_readings(readings)
+                readings.distance = sensor_manager.get_distance()/100
+                display.update_distance(readings.distance)
+                print(readings.distance)
+                ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+                device.measurement_taken = True
+
+            # While TAKING_MEASURMENT, everything else is paused (no updates)
+
+        await asyncio.sleep(0.5)
 
 
-async def watch_for_button_presses(states):
+async def watch_for_button_presses(readings, device):
     while True:
         button_manager.update()
 
-        # If "Fire Button" is pressed, perform a special action
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
-            states.distance = sensor_manager.get_distance()
-            update_az_inc(states)
-            print(states.distance)
-            ble.send_message(states.azimuth,states.inclination,states.distance)
 
-        await asyncio.sleep(0)
+            if device.current_state == SystemState.IDLE:
+                device.current_state = SystemState.TAKING_MEASURMENT
+                device.measurement_taken = False  # reset flag
+            elif device.current_state == SystemState.TAKING_MEASURMENT:
+                device.current_state = SystemState.IDLE
+                sensor_manager.set_laser(True)
 
+        await asyncio.sleep(0.01)
+
+
+def update_readings(readings):
+    try:
+        readings.azimuth, readings.inclination, readings.roll = readings.calib_updated.get_angles(
+            sensor_manager.get_mag(), sensor_manager.get_grav()
+        )
+        print(f"({readings.azimuth})")
+
+    except Exception as e:
+        print(e)
 
 async def main():
 
@@ -78,8 +111,8 @@ async def main():
     display.display_screen_initialise()
     display.update_battery(sensor_manager.get_bat())
 
-    sensor_reading = asyncio.create_task(sensor_read_display_update(device_states))
-    watch_for_buttons = asyncio.create_task(watch_for_button_presses(device_states))
+    sensor_reading = asyncio.create_task(sensor_read_display_update(readings, device))
+    watch_for_buttons = asyncio.create_task(watch_for_button_presses(readings, device))
     # # Print calibration data to confirm
     # calibration_dict = calib_updated.as_dict()
     # print(calibration_dict)
