@@ -16,6 +16,20 @@ button_manager = ButtonManager()
 display = DisplayManager()
 ble = BleManager()
 
+print("Loading modules")
+time.sleep(0.02)
+print("...Display Settings")
+time.sleep(0.01)
+print("...Calibration")
+print("...Bluetooth")
+time.sleep(0.01)
+print("...Sensors")
+time.sleep(0.1)
+print("...Config.")
+time.sleep(0.01)
+print("Starting Device")
+time.sleep(0.1)
+
 # Temp calibration dict for development/testing
 calibration_dict = {'mag': {'axes': '-X-Y-Z', 'transform': [[0.0231683, -4.50966e-05, -0.000208465], [-4.50968e-05, 0.0233006, -2.46289e-05], [-0.000208464, -2.46296e-05, 0.0231333]], 'centre': [0.407859, -1.9058, 2.11295], 'rbfs': [], 'field_avg': None, 'field_std': None}, 'dip_avg': None, 'grav': {'axes': '-Y-X+Z', 'transform': [[0.101454, 0.00155312, -0.000734401], [0.00155312, 0.101232, 0.00149594], [-0.000734397, 0.00149594, 0.0987455]], 'centre': [0.364566, -0.0656354, 0.193454], 'rbfs': [], 'field_avg': None, 'field_std': None}}
 
@@ -49,9 +63,7 @@ class DeviceContext:
         self.measurement_taken = False  # NEW FLAG
 
 device = DeviceContext()
-
 device.current_state = SystemState.IDLE
-print(device.current_state)
 
 async def sensor_read_display_update(readings, device):
     while True:
