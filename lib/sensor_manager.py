@@ -63,27 +63,20 @@ class SensorManager:
         return self.grav_sensor.acceleration
 
     def get_mag(self):
-        """Get the 5-point average of the magnetometer readings."""
+        """Take 10 immediate magnetometer readings and return the averaged result."""
         try:
-            # Get the current magnetometer reading
-            mag_reading = self.mag_sensor.magnetic
+            readings = []
+            for _ in range(15):
+                reading = self.mag_sensor.magnetic  # Read [x, y, z]
+                readings.append(reading)
+                time.sleep(0.01)  # Small delay to allow sensor to settle, tweak as needed
 
-            # Append the current reading to the list
-            self.mag_readings.append(mag_reading)
+            avg_mag = [sum(axis_vals) / 15 for axis_vals in zip(*readings)]
+            return avg_mag
 
-            # If there are more than 5 readings, remove the oldest one
-            if len(self.mag_readings) > 10:
-                self.mag_readings.pop(0)
-
-            # If we have at least 5 readings, calculate the average
-            if len(self.mag_readings) == 5:
-                avg_mag = [sum(x) / len(x) for x in zip(*self.mag_readings)]  # Average each axis
-                return avg_mag
-            else:
-                return mag_reading  # Return current reading if there are fewer than 5
         except Exception as e:
             print(f"Error reading magnetometer: {e}")
-            return [0, 0, 0]  # Return default value if error occurs
+            return [0, 0, 0]
 
     def get_bat(self):
         """Get the current battery percentage."""
