@@ -105,3 +105,17 @@ class DisplayManager:
         """Releases the display resources."""
         displayio.release_displays()
 
+
+    def blank_screen(self):
+        # Clears the display
+        splash = displayio.Group()
+
+        black_bitmap = displayio.Bitmap(self.display.width, self.display.height, 1)
+        black_palette = displayio.Palette(1)
+        black_palette[0] = 0x000000  # Black
+
+        black_tilegrid = displayio.TileGrid(black_bitmap, pixel_shader=black_palette)
+        splash.append(black_tilegrid)
+
+        self.display.root_group = splash
+        self.display.refresh()
