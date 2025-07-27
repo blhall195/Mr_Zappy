@@ -17,6 +17,17 @@ button_manager = ButtonManager()
 display = DisplayManager()
 ble = BleManager()
 
+COMMANDS = {
+    "ACK0": 0x55,
+    "ACK1": 0x56,
+    "START_CAL": 0x31,
+    "STOP_CAL": 0x30,
+    "LASER_ON": 0x36,
+    "LASER_OFF": 0x37,
+    "DEVICE_OFF": 0x34,
+    "TAKE_SHOT": 0x38,
+}
+
 display.display_screen_initialise()
 
 ble_status_pin = digitalio.DigitalInOut(board.D11)
@@ -88,30 +99,32 @@ async def sensor_read_display_update(readings, device):
             if not device.measurement_taken:
                 update_readings(readings)
                 readings.distance = sensor_manager.get_distance() / 100
-                display.update_distance(readings.distance)
-                print(readings.distance)
+                display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
                 ble.send_message(readings.azimuth, readings.inclination, readings.distance)
                 device.measurement_taken = True
 
         await asyncio.sleep(0.25)
 
 
-async def watch_for_button_presses(readings, device):
+async def watch_for_button_presses(device):
     while True:
         button_manager.update()
 
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
-
-            if device.current_state == SystemState.IDLE:
-                device.current_state = SystemState.TAKING_MEASURMENT
-                device.measurement_taken = False  # reset flag
-            elif device.current_state == SystemState.TAKING_MEASURMENT:
-                device.current_state = SystemState.IDLE
+            if device.current_state == "IDLE":
+                device.current_state = "TAKING_MEASURMENT"
+                device.measurement_taken = False
+            else:
+                print("System busy, ignoring button press.")
+                device.current_state = "IDLE"
 
         elif button_manager.was_pressed("Button 2"):
-            print("Button 2 pressed!")
-            device.current_state = SystemState.CALIBRATING
+            if device.current_state == "IDLE":
+                print("Entering calibration mode")
+                device.current_state = "CALIBRATING"
+            else:
+                print("System busy, can't calibrate now.")
 
         await asyncio.sleep(0.01)
 
@@ -151,14 +164,49 @@ async def monitor_ble_pin(device):
         await asyncio.sleep(0.1)
 
 
+def handle_command(cmd_byte, device, sensor_manager):
+    if cmd_byte == 0x31:  # START_CAL
+        device.current_state = "CALIBRATING"
+    elif cmd_byte == 0x30:  # STOP_CAL
+        device.current_state = "IDLE"
+    elif cmd_byte == 0x36:  # LASER_ON
+        sensor_manager.set_laser(True)
+    elif cmd_byte == 0x37:  # LASER_OFF
+        sensor_manager.set_laser(False)
+    elif cmd_byte == 0x38:  # TAKE_SHOT
+        device.current_state = "TAKING_MEASURMENT"
+        device.measurement_taken = False
+    elif cmd_byte == 0x34:  # DEVICE_OFF
+        print("🛑 Device OFF command received")
+        # Add shutdown code here
+    elif cmd_byte in (0x55, 0x56):  # ACKs
+        print("✅ ACK received:", cmd_byte)
+
+async def monitor_ble_uart(ble_manager, device, sensor_manager):
+    while True:
+        msg = ble_manager.read_message()
+        if msg:
+            print(f"📥 UART message from slave: {msg}")
+
+            if msg in COMMANDS:
+                cmd_byte = COMMANDS[msg]
+                handle_command(cmd_byte, device, sensor_manager)
+
+            elif msg.isdigit():
+                cmd_byte = int(msg)
+                handle_command(cmd_byte, device, sensor_manager)
+
+        await asyncio.sleep(0.01)
+
 async def main():
     calibration = PerformCalibration(sensor_manager, button_manager, calib)
 
     # Create and start background tasks once
     sensor_reading = asyncio.create_task(sensor_read_display_update(readings, device))
-    watch_for_buttons = asyncio.create_task(watch_for_button_presses(readings, device))
+    watch_for_buttons = asyncio.create_task(watch_for_button_presses(device))
     check_battery = asyncio.create_task(check_battery_sensor(readings))
     monitor_ble = asyncio.create_task(monitor_ble_pin(device))
+    monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
 
     while True:
         # Wait until calibration is triggered
@@ -181,7 +229,7 @@ async def main():
         print("Calibration starting...")
 
         # Perform calibration (blocking)
-        await calibration.start_calibration()
+        await calibration.start_calibration(device)
 
         # Update calibration data
         readings.calib_updated = calib
@@ -192,9 +240,10 @@ async def main():
 
         # Restart background tasks after calibration
         sensor_reading = asyncio.create_task(sensor_read_display_update(readings, device))
-        watch_for_buttons = asyncio.create_task(watch_for_button_presses(readings, device))
+        watch_for_buttons = asyncio.create_task(watch_for_button_presses(device))
         check_battery = asyncio.create_task(check_battery_sensor(readings))
         monitor_ble = asyncio.create_task(monitor_ble_pin(device))
+        monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
 
 
 asyncio.run(main())

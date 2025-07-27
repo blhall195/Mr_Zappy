@@ -15,9 +15,28 @@ class BleManager:
 
     def send_message(self, compass: float, clino: float, dist: float):
         """Format and send a survey data message."""
-        message = f"COMPASS:{compass:.1f},CLINO:{clino:.1f},DIST:{dist:.1f}\n".encode("utf-8")
+        message = f"COMPASS:{compass:.1f},CLINO:{clino:.1f},DIST:{dist:.2f}\n".encode("utf-8")
         self.drdy.value = True
         self.uart.write(message)
         time.sleep(0.1)
         self.drdy.value = False
         print("wrote message:", message.decode().strip())
+
+    def read_message(self):
+        """Non-blocking UART read; returns a decoded line if available."""
+        data = self.uart.read(64)
+        if not data:
+            return None
+
+        if not hasattr(self, "_rx_buffer"):
+            self._rx_buffer = b''
+
+        self._rx_buffer += data
+
+        if b'\n' in self._rx_buffer:
+            line, self._rx_buffer = self._rx_buffer.split(b'\n', 1)
+            try:
+                return line.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                return None
+        return None
