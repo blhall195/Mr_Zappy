@@ -54,14 +54,13 @@ class DisplayManager:
         self.display.root_group = self.splash
 
     def update_sensor_readings(self, distance, azimuth, inclination):
-        # If the distance is 0, show nothing
         if distance == 0:
             self.distance_label.text = ""
         else:
-            # Otherwise, display the distance with 2 decimal places
             self.distance_label.text = f"{distance:.2f}m"
-        self.azimuth_label.text = f"{round(azimuth, 1)}°"
-        self.inclination_label.text = f"{round(inclination, 1)}°"
+
+        self.azimuth_label.text = f"{azimuth:.1f}°"
+        self.inclination_label.text = f"{inclination:.1f}°"
 
     def update_distance(self, distance):
         """Update the distance label on the display. Accepts numeric or string values."""
