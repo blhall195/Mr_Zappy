@@ -2,6 +2,7 @@ import asyncio
 import board
 import digitalio
 import time
+import math
 from sensor_manager import SensorManager
 from button_manager import ButtonManager
 from display_manager import DisplayManager
@@ -17,6 +18,10 @@ display = DisplayManager()
 ble = BleManager()
 
 display.display_screen_initialise()
+
+ble_status_pin = digitalio.DigitalInOut(board.D11)
+ble_status_pin.direction = digitalio.Direction.INPUT
+ble_status_pin.pull = digitalio.Pull.DOWN
 
 # Temporary calibration dict for development/testing
 calibration_dict = {'mag': {'axes': '-X-Y-Z', 'transform': [[0.0231683, -4.50966e-05, -0.000208465], [-4.50968e-05, 0.0233006, -2.46289e-05], [-0.000208464, -2.46296e-05, 0.0231333]], 'centre': [0.407859, -1.9058, 2.11295], 'rbfs': [], 'field_avg': None, 'field_std': None}, 'dip_avg': None, 'grav': {'axes': '-Y-X+Z', 'transform': [[0.101454, 0.00155312, -0.000734401], [0.00155312, 0.101232, 0.00149594], [-0.000734397, 0.00149594, 0.0987455]], 'centre': [0.364566, -0.0656354, 0.193454], 'rbfs': [], 'field_avg': None, 'field_std': None}}
@@ -59,6 +64,9 @@ async def sensor_read_display_update(readings, device):
     prev_azimuth = None
     laser_enabled = False  # Track laser state manually
 
+    def safe_number(val):
+        return isinstance(val, (int, float)) and math.isfinite(val)
+
     while True:
         if device.current_state == SystemState.IDLE:
             if laser_enabled:
@@ -66,9 +74,11 @@ async def sensor_read_display_update(readings, device):
                 laser_enabled = False
 
             update_readings(readings)
-            if prev_azimuth is None or abs(readings.azimuth - prev_azimuth) >= 1:
-                display.update_sensor_readings(0, readings.azimuth, readings.inclination)
-                prev_azimuth = readings.azimuth
+
+            if safe_number(readings.azimuth) and safe_number(readings.inclination):
+                if prev_azimuth is None or abs(readings.azimuth - prev_azimuth) >= 1:
+                    display.update_sensor_readings(0, readings.azimuth, readings.inclination)
+                    prev_azimuth = readings.azimuth
 
         elif device.current_state == SystemState.TAKING_MEASURMENT:
             if not laser_enabled:
@@ -124,6 +134,22 @@ async def check_battery_sensor(readings):
         await asyncio.sleep(30)
 
 
+async def monitor_ble_pin(device):
+    last_value = None
+    while True:
+        current_value = ble_status_pin.value
+        if current_value != last_value:
+            if current_value:
+                print("🔵 BLE Status Pin: CONNECTED")
+                device.ble_connected = True
+                display.update_BT_label(True)
+            else:
+                print("🔴 BLE Status Pin: DISCONNECTED")
+                device.ble_connected = False
+                display.update_BT_label(False)
+            last_value = current_value
+        await asyncio.sleep(0.1)
+
 
 async def main():
     calibration = PerformCalibration(sensor_manager, button_manager, calib)
@@ -132,6 +158,7 @@ async def main():
     sensor_reading = asyncio.create_task(sensor_read_display_update(readings, device))
     watch_for_buttons = asyncio.create_task(watch_for_button_presses(readings, device))
     check_battery = asyncio.create_task(check_battery_sensor(readings))
+    monitor_ble = asyncio.create_task(monitor_ble_pin(device))
 
     while True:
         # Wait until calibration is triggered
@@ -167,6 +194,7 @@ async def main():
         sensor_reading = asyncio.create_task(sensor_read_display_update(readings, device))
         watch_for_buttons = asyncio.create_task(watch_for_button_presses(readings, device))
         check_battery = asyncio.create_task(check_battery_sensor(readings))
+        monitor_ble = asyncio.create_task(monitor_ble_pin(device))
 
 
 asyncio.run(main())

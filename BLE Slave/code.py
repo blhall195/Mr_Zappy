@@ -8,33 +8,20 @@ from adafruit_ble import BLERadio
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 import caveble  # Assumed to contain SurveyProtocolService
 from button_manager import ButtonManager
+import microcontroller
+
+# Wake detection
+if alarm.wake_alarm:
+    print("🌙 Woke from sleep.")
+else:
+    print("🌀 First boot or reset.")
 
 #Turn on M4 microcontroller + sensors
 M4_en_pin = digitalio.DigitalInOut(board.D12)
 M4_en_pin.direction = digitalio.Direction.OUTPUT
 M4_en_pin.value = False
-
-#Turn on laser
-laser_en_pin = digitalio.DigitalInOut(board.A2)
-laser_en_pin.direction = digitalio.Direction.OUTPUT
-laser_en_pin.value = True
-
-#Turn on OLED
-screen_en_pin = digitalio.DigitalInOut(board.A5)
-screen_en_pin.direction = digitalio.Direction.OUTPUT
-screen_en_pin.value = True
-
-# Set up D10 status pin
-status_pin = digitalio.DigitalInOut(board.D10)
-status_pin.direction = digitalio.Direction.OUTPUT
-status_pin.value = True
-print("✅ D10 - status pin set HIGH (wakes main controller).")
-
-# Wake detection
-if alarm.wake_alarm:
-    print("🟢 Woke from pin alarm on D10 pin.")
-else:
-    print("🌀 First boot or reset.")
+#
+print("hello world")
 
 # BLE Setup
 ble = BLERadio()
@@ -51,6 +38,16 @@ uart = busio.UART(board.TX, board.RX, baudrate=9600, timeout=0.1)
 drdy = digitalio.DigitalInOut(board.D7)
 drdy.direction = digitalio.Direction.INPUT
 drdy.pull = digitalio.Pull.DOWN
+
+#BLE_Connected Pin Setup
+ble_connected = digitalio.DigitalInOut(board.D5)
+ble_connected.direction = digitalio.Direction.OUTPUT
+ble_connected.value = False  # Start LOW (disconnected)
+
+#BLE_Connected Pin Setup
+LZR_power = digitalio.DigitalInOut(board.A2)
+LZR_power.direction = digitalio.Direction.OUTPUT
+LZR_power.value = True  # Start HIGH power on
 
 # UART Parsing
 line_buffer = b''
@@ -102,7 +99,36 @@ async def poll_ble_loop():
         message = survey_protocol.poll()
         if message:
             print(f"Message received: {message}")
+            try:
+                # Convert message to bytes if not already
+                if isinstance(message, str):
+                    uart.write((message + "\n").encode("utf-8"))
+                elif isinstance(message, bytes):
+                    uart.write(message + b"\n")
+                else:
+                    # Fallback for other types (e.g., dicts or objects)
+                    uart.write((str(message) + "\n").encode("utf-8"))
+
+                print("📤 Message forwarded via UART")
+            except Exception as e:
+                print(f"⚠️ UART send failed: {e}")
         await asyncio.sleep(0.01)
+
+async def monitor_ble_connection(device):
+    last_state = ble.connected
+    while True:
+        current_state = ble.connected
+        if current_state != last_state:
+            if current_state:
+                print("🔵 BLE Connected")
+                device.change_state("Active")
+                ble_connected.value = True  # Set HIGH when connected
+            else:
+                print("🔴 BLE Disconnected")
+                device.change_state("Idle")
+                ble_connected.value = False  # Set LOW when disconnected
+            last_state = current_state
+        await asyncio.sleep(0.1)
 
 async def blink_led():
     await asyncio.sleep(0.1)
@@ -145,6 +171,7 @@ async def main():
         asyncio.create_task(read_uart_loop()),
         asyncio.create_task(poll_ble_loop()),
         asyncio.create_task(monitor_buttons(buttons, device)),
+        asyncio.create_task(monitor_ble_connection(device)),
     ]
 
     while True:
@@ -160,7 +187,6 @@ async def main():
 
     # Prepare for deep sleep
     print("💤 Preparing for deep sleep...")
-    status_pin.value = False
 
     print("⏳ Waiting for button release before sleeping...")
     while True:
@@ -170,9 +196,9 @@ async def main():
 
     pin_alarm = alarm.pin.PinAlarm(pin=board.A0, value=False, pull=True)
 
-    laser_en_pin.value = False
-    screen_en_pin.value = False
     M4_en_pin.value = True
+    LZR_power.value = False
+
     alarm.exit_and_deep_sleep_until_alarms(pin_alarm)
 
 # Start the loop
