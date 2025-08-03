@@ -25,7 +25,7 @@ class SensorManager:
         self.grav_sensor = ISM330DHCX(i2c)
 
         # Initialize mag_sensor
-        self.mag_sensor = rm3100.RM3100_I2C(i2c, i2c_address=0x20)
+        self.mag_sensor = rm3100.RM3100_I2C(i2c, i2c_address=0x20, cycle_count=3000)
 
         # Initialize bat_sensor
         self.max17 = adafruit_max1704x.MAX17048(i2c)
@@ -63,17 +63,9 @@ class SensorManager:
         return self.grav_sensor.acceleration
 
     def get_mag(self):
-        """Take 10 immediate magnetometer readings and return the averaged result."""
         try:
-            readings = []
-            for _ in range(15):
-                reading = self.mag_sensor.magnetic  # Read [x, y, z]
-                readings.append(reading)
-                time.sleep(0.01)  # Small delay to allow sensor to settle, tweak as needed
-
-            avg_mag = [sum(axis_vals) / 15 for axis_vals in zip(*readings)]
-            return avg_mag
-
+            reading = self.mag_sensor.magnetic  # Read [x, y, z]
+            return reading
         except Exception as e:
             print(f"Error reading magnetometer: {e}")
             return [0, 0, 0]

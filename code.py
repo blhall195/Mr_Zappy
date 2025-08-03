@@ -87,7 +87,7 @@ async def sensor_read_display_update(readings, device):
             update_readings(readings)
 
             if safe_number(readings.azimuth) and safe_number(readings.inclination):
-                if prev_azimuth is None or abs(readings.azimuth - prev_azimuth) >= 1:
+                if prev_azimuth is None or abs(readings.azimuth - prev_azimuth) >= 0.2:
                     display.update_sensor_readings(0, readings.azimuth, readings.inclination)
                     prev_azimuth = readings.azimuth
 
