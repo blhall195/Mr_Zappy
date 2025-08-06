@@ -35,7 +35,7 @@ class DisplayManager:
         self.azimuth_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=78)
         self.inclination_label = label.Label(self.font, scale=3, text="0.0°", x=0, y=112)
         self.BT_label = label.Label(self.font, scale=2, text="BT", x=0, y=6)
-        self.BT_number = label.Label(self.font, scale=2, text="0", x=35, y=6)
+        #self.BT_number = label.Label(self.font, scale=2, text="0", x=35, y=6)
 
         # Create display group
         self.splash = displayio.Group()
@@ -43,7 +43,7 @@ class DisplayManager:
         self.splash.append(self.azimuth_label)
         self.splash.append(self.inclination_label)
         self.splash.append(self.BT_label)
-        self.splash.append(self.BT_number)
+        #self.splash.append(self.BT_number)
 
         # Add battery symbol elements
         self.splash.append(self.battery_outline)

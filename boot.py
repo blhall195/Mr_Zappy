@@ -1,4 +1,3 @@
-"""
 #delete the 3 apostrophies above if you want to enable the boot out code to allow
 #the microcontroller to write to the devices memory when not plugged into a PC
 
