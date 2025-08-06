@@ -9,6 +9,8 @@ from display_manager import DisplayManager
 from calibration_manager import PerformCalibration
 from mag_cal.calibration import Calibration
 from ble_manager import BleManager
+from disco_manager import DiscoMode
+import json
 
 # Create instances
 calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
@@ -16,6 +18,7 @@ sensor_manager = SensorManager()
 button_manager = ButtonManager()
 display = DisplayManager()
 ble = BleManager()
+disco_mode = DiscoMode()
 
 COMMANDS = {
     "ACK0": 0x55,
@@ -34,8 +37,8 @@ ble_status_pin = digitalio.DigitalInOut(board.D11)
 ble_status_pin.direction = digitalio.Direction.INPUT
 ble_status_pin.pull = digitalio.Pull.DOWN
 
-# Temporary calibration dict for development/testing
-calibration_dict = {'mag': {'axes': '-X-Y-Z', 'transform': [[0.0231683, -4.50966e-05, -0.000208465], [-4.50968e-05, 0.0233006, -2.46289e-05], [-0.000208464, -2.46296e-05, 0.0231333]], 'centre': [0.407859, -1.9058, 2.11295], 'rbfs': [], 'field_avg': None, 'field_std': None}, 'dip_avg': None, 'grav': {'axes': '-Y-X+Z', 'transform': [[0.101454, 0.00155312, -0.000734401], [0.00155312, 0.101232, 0.00149594], [-0.000734397, 0.00149594, 0.0987455]], 'centre': [0.364566, -0.0656354, 0.193454], 'rbfs': [], 'field_avg': None, 'field_std': None}}
+with open("/calibration_dict.json", "r") as f:
+    calibration_dict = json.load(f)
 
 # A class for storing device readings
 class Readings:
@@ -101,15 +104,44 @@ async def sensor_read_display_update(readings, device):
                 readings.distance = sensor_manager.get_distance() / 100
                 display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
                 ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+
+
                 device.measurement_taken = True
 
         await asyncio.sleep(0.25)
 
 
 async def watch_for_button_presses(device):
+    both_pressed_start = None
+    disco_on = False
+
     while True:
         button_manager.update()
 
+        # Detect if both buttons are pressed simultaneously
+        button1_pressed = button_manager.is_pressed("Button 1")  # Assuming you have is_pressed method
+        button2_pressed = button_manager.is_pressed("Button 2")
+
+        if button1_pressed and button2_pressed:
+            if both_pressed_start is None:
+                both_pressed_start = time.monotonic()
+            else:
+                held_time = time.monotonic() - both_pressed_start
+                if held_time >= 3.0:
+                    # Toggle disco mode
+                    if disco_on:
+                        disco_mode.off()
+                        disco_on = False
+                        print("Disco mode OFF (buttons held 3s)")
+                    else:
+                        disco_mode.on()
+                        disco_on = True
+                        print("Disco mode ON (buttons held 3s)")
+                    both_pressed_start = None  # Reset to prevent repeated toggling
+        else:
+            both_pressed_start = None  # Reset timer if buttons not pressed together
+
+        # Your existing single button logic:
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
             if device.current_state == "IDLE":
@@ -127,6 +159,7 @@ async def watch_for_button_presses(device):
                 print("System busy, can't calibrate now.")
 
         await asyncio.sleep(0.01)
+
 
 
 def update_readings(readings,):
