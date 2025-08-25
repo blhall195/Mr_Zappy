@@ -11,6 +11,15 @@ from mag_cal.calibration import Calibration
 from ble_manager import BleManager
 from disco_manager import DiscoMode
 import json
+from calibrate_roll import align_sensor_roll
+
+try:
+    from calibrate_roll import align_sensor_roll
+    if not hasattr(Calibration, "align_sensor_roll"):
+        Calibration.align_sensor_roll = align_sensor_roll
+        print("✅ align_sensor_roll successfully patched into Calibration")
+except Exception as e:
+    print(f"❌ Failed to patch align_sensor_roll: {e}")
 
 # Create instances
 calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
