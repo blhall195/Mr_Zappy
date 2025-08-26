@@ -6,6 +6,7 @@ from laser_egismos import Laser
 from adafruit_lsm6ds.ism330dhcx import ISM330DHCX
 import rm3100
 import adafruit_max1704x
+from collections import deque
 
 class SensorManager:
     def __init__(self):
@@ -14,7 +15,7 @@ class SensorManager:
         self.laser_power.switch_to_output(False)
         time.sleep(0.3)
         self.laser_power.switch_to_output(True)
-        time.sleep(0.1)
+        time.sleep(0.9)
 
         # Initialize laser over UART
         self.uart = busio.UART(board.TX, board.RX, baudrate=9600)
@@ -23,6 +24,8 @@ class SensorManager:
         # Initialize I2C and accelerometer
         i2c = board.I2C()  # uses board.SCL and board.SDA
         self.grav_sensor = ISM330DHCX(i2c)
+        self._grav_history = []  # use a plain list
+        self._grav_maxlen = 3    # smoothing window size
 
         # Initialize mag_sensor
         self.mag_sensor = rm3100.RM3100_I2C(i2c, i2c_address=0x20, cycle_count=3000)
@@ -57,10 +60,28 @@ class SensorManager:
             print(f"Error setting buzzer state: {e}")
             return None
 
-    # Orientation stuff
     def get_grav(self):
-        """Get the current grav reading from the accelerometer."""
-        return self.grav_sensor.acceleration
+        """Return smoothed gravity reading using a rolling average."""
+        raw = self.grav_sensor.acceleration
+        if raw is None:
+            return (0.0, 0.0, 0.0)
+
+        # Add new reading to history
+        self._grav_history.append(raw)
+
+        # Enforce fixed-length history
+        if len(self._grav_history) > self._grav_maxlen:
+            self._grav_history.pop(0)  # remove oldest
+
+        # Calculate average
+        gx_sum = gy_sum = gz_sum = 0.0
+        for gx, gy, gz in self._grav_history:
+            gx_sum += gx
+            gy_sum += gy
+            gz_sum += gz
+
+        n = len(self._grav_history)
+        return (gx_sum / n, gy_sum / n, gz_sum / n)
 
     def get_mag(self):
         try:
