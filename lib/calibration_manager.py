@@ -2,6 +2,9 @@ import asyncio
 import json
 import gc
 
+
+
+
 class PerformCalibration:
     def __init__(self, sensor_manager, button_manager, calib):
         self.calib = calib
@@ -16,13 +19,13 @@ class PerformCalibration:
         button_mgr = self.button_manager
         calib = self.calib
 
-        sensor_mgr.set_laser(False)
+        sensor_mgr.set_laser(True)
         self.mag_array.clear()
         self.grav_array.clear()
 
         # --- First phase ---
         iteration = 0
-        while iteration < 16:
+        while iteration < 30:
             if device.current_state != "CALIBRATING":
                 print("❌ Calibration cancelled during phase 1.")
                 return
@@ -36,7 +39,7 @@ class PerformCalibration:
 
                 self.mag_array.append(mag_data)
                 self.grav_array.append(grav_data)
-                print(f"📍 Calib Point {iteration}/24")
+                print(f"📍 Calib Point {iteration}/16")
                 sensor_mgr.set_buzzer(True)
 
             await asyncio.sleep(0.02)  # slight increase for less CPU load
@@ -46,6 +49,26 @@ class PerformCalibration:
         print(f"✅ Grav: {grav_accuracy}")
         print("")
         await asyncio.sleep(0.1)
+
+
+        #--------------------------------------------------
+        #save data for testing
+        # Build and save raw data to its own dict and file
+        raw_data = {
+            "mag": [list(m) for m in self.mag_array],
+            "grav": [list(g) for g in self.grav_array]
+        }
+
+        try:
+            with open("/raw_ellipsoid_data.json", "w") as f:
+                json.dump(raw_data, f)
+            print("📦 Raw sensor data saved.")
+        except Exception as e:
+            print(f"❌ Failed to save raw data: {e}")
+        #--------------------------------------------------
+
+
+
 
         # Free memory from first phase data if no longer needed there
         # If the data is still needed later, skip these lines
@@ -89,6 +112,22 @@ class PerformCalibration:
                 sensor_mgr.set_buzzer(True)
 
             await asyncio.sleep(0.02)  # slightly more delay
+
+
+        #--------------------------------------------------
+        #save data for testing
+        # Build and save raw data to its own dict and file
+        raw_data = {
+            "mag": [list(m) for m in self.mag_array],
+            "grav": [list(g) for g in self.grav_array]
+        }
+        try:
+            with open("/raw_alignment_mag_grav_data.json", "w") as f:
+                json.dump(raw_data, f)
+            print("📦 Raw sensor data saved.")
+        except Exception as e:
+            print(f"❌ Failed to save raw data: {e}")
+        #--------------------------------------------------
 
         # --- Final fitting ---
         runs = calib.find_similar_shots(self.mag_array, self.grav_array)
