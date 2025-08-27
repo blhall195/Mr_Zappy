@@ -1,9 +1,7 @@
 import asyncio
 import json
 import gc
-
-
-
+from disco_manager import DiscoMode
 
 class PerformCalibration:
     def __init__(self, sensor_manager, button_manager, calib):
@@ -13,7 +11,7 @@ class PerformCalibration:
         self.mag_array = []
         self.grav_array = []
 
-    async def start_calibration(self, device):
+    async def start_calibration(self, device, disco_mode):
         print("🔧 Starting calibration. Press fire button while rotating the device in all directions.")
         sensor_mgr = self.sensor_manager
         button_mgr = self.button_manager
@@ -25,24 +23,56 @@ class PerformCalibration:
 
         # --- First phase ---
         iteration = 0
-        while iteration < 30:
+        mag_buffer = []
+        grav_buffer = []
+
+        while iteration < 16:
             if device.current_state != "CALIBRATING":
                 print("❌ Calibration cancelled during phase 1.")
                 return
 
             button_mgr.update()
 
+            # Always collect latest readings
+            mag_data = sensor_mgr.get_mag()
+            grav_data = sensor_mgr.get_grav()
+
+            # Maintain buffer of last 3 readings
+            mag_buffer.append(mag_data)
+            grav_buffer.append(grav_data)
+
+            if len(mag_buffer) > 3:
+                mag_buffer.pop(0)
+            if len(grav_buffer) > 3:
+                grav_buffer.pop(0)
+
+            # Check consistency and update LED
+            if len(mag_buffer) == 3 and len(grav_buffer) == 3:
+                def is_consistent(buffer, threshold=0.3):
+                    base = buffer[0]
+                    for other in buffer[1:]:
+                        diffs = [abs(a - b) for a, b in zip(base, other)]
+                        if any(diff > threshold for diff in diffs):
+                            return False
+                    return True
+
+                mag_ok = is_consistent(mag_buffer)
+                grav_ok = is_consistent(grav_buffer)
+
+                if mag_ok and grav_ok:
+                    disco_mode.set_green()
+                else:
+                    disco_mode.set_red()
+
+            # Only record samples if button is pressed
             if button_mgr.was_pressed("Button 1"):
                 iteration += 1
-                mag_data = sensor_mgr.get_mag()
-                grav_data = sensor_mgr.get_grav()
-
                 self.mag_array.append(mag_data)
                 self.grav_array.append(grav_data)
-                print(f"📍 Calib Point {iteration}/16")
+                print(f"📍 Calib Point {iteration}/30")
                 sensor_mgr.set_buzzer(True)
 
-            await asyncio.sleep(0.02)  # slight increase for less CPU load
+            await asyncio.sleep(0.02)
 
         mag_accuracy, grav_accuracy = calib.fit_ellipsoid(self.mag_array, self.grav_array)
         print(f"✅ Mag: {mag_accuracy}")

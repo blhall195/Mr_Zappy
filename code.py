@@ -139,11 +139,11 @@ async def watch_for_button_presses(device):
                 if held_time >= 3.0:
                     # Toggle disco mode
                     if disco_on:
-                        disco_mode.off()
+                        disco_mode.turn_off()
                         disco_on = False
                         print("Disco mode OFF (buttons held 3s)")
                     else:
-                        disco_mode.on()
+                        disco_mode.start_disco()
                         disco_on = True
                         print("Disco mode ON (buttons held 3s)")
                     both_pressed_start = None  # Reset to prevent repeated toggling
@@ -271,7 +271,7 @@ async def main():
         print("Calibration starting...")
 
         # Perform calibration (blocking)
-        await calibration.start_calibration(device)
+        await calibration.start_calibration(device, disco_mode)
 
         # Update calibration data
         readings.calib_updated = calib
