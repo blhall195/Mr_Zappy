@@ -44,7 +44,6 @@ class DiscoMode:
         self._stop_disco()
         self.pixels.fill((0, 0, 0))
         self.pixels.show()
-        print("LED OFF")
 
     def _stop_disco(self):
         """Stop the disco effect if running."""
