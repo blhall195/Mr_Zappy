@@ -1,3 +1,8 @@
+import os
+
+if "calibration_mode_activate.txt" in os.listdir("/"):
+    import calibration_alignment
+
 import asyncio
 import board
 import digitalio
@@ -21,33 +26,12 @@ try:
 except Exception as e:
     print(f"❌ Failed to patch align_sensor_roll: {e}")
 
-# Create instances
-calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
 sensor_manager = SensorManager()
 button_manager = ButtonManager()
 display = DisplayManager()
 ble = BleManager()
 disco_mode = DiscoMode()
-
-COMMANDS = {
-    "ACK0": 0x55,
-    "ACK1": 0x56,
-    "START_CAL": 0x31,
-    "STOP_CAL": 0x30,
-    "LASER_ON": 0x36,
-    "LASER_OFF": 0x37,
-    "DEVICE_OFF": 0x34,
-    "TAKE_SHOT": 0x38,
-}
-
-display.display_screen_initialise()
-
-ble_status_pin = digitalio.DigitalInOut(board.D11)
-ble_status_pin.direction = digitalio.Direction.INPUT
-ble_status_pin.pull = digitalio.Pull.DOWN
-
-with open("/calibration_dict.json", "r") as f:
-    calibration_dict = json.load(f)
+calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
 
 # A class for storing device readings
 class Readings:
@@ -58,11 +42,7 @@ class Readings:
         self.distance = 0
         self.calib_updated = None
         self.battery_level = 0
-
 readings = Readings()
-
-# Update calib from the dictionary
-readings.calib_updated = calib.from_dict(calibration_dict)
 
 #class for storing system states
 class SystemState():
@@ -82,6 +62,34 @@ class DeviceContext:
 device = DeviceContext()
 device.current_state = SystemState.IDLE
 
+try:
+    with open("/calibration_dict.json", "r") as f:
+        calibration_dict = json.load(f)
+    calib = calib.from_dict(calibration_dict)
+    readings.calib_updated = calib.from_dict(calibration_dict)
+except OSError:
+    print("Calibration file not found, using default calibration.")
+    calibration = PerformCalibration(sensor_manager, button_manager, calib)
+    asyncio.run(calibration.start_calibration(device, disco_mode))
+    device.current_state = "CALIBRATING"
+
+COMMANDS = {
+    "ACK0": 0x55,
+    "ACK1": 0x56,
+    "START_CAL": 0x31,
+    "STOP_CAL": 0x30,
+    "LASER_ON": 0x36,
+    "LASER_OFF": 0x37,
+    "DEVICE_OFF": 0x34,
+    "TAKE_SHOT": 0x38,
+}
+
+display.display_screen_initialise()
+
+ble_status_pin = digitalio.DigitalInOut(board.D11)
+ble_status_pin.direction = digitalio.Direction.INPUT
+ble_status_pin.pull = digitalio.Pull.DOWN
+
 
 async def sensor_read_display_update(readings, device):
     prev_azimuth = None
@@ -89,6 +97,19 @@ async def sensor_read_display_update(readings, device):
 
     def safe_number(val):
         return isinstance(val, (int, float)) and math.isfinite(val)
+
+    def is_consistent(buffer, threshold=0.5):
+        base = buffer[0]
+        for other in buffer[1:]:
+            if abs(base - other) > threshold:
+                return False
+        return True
+
+    azimuth_buffer = []
+    inclination_buffer = []
+    waiting_for_stable_measurement = False
+    laser_enabled = False
+    prev_azimuth = None
 
     while True:
         if device.current_state == SystemState.IDLE:
@@ -103,21 +124,49 @@ async def sensor_read_display_update(readings, device):
                     display.update_sensor_readings(0, readings.azimuth, readings.inclination)
                     prev_azimuth = readings.azimuth
 
+            # Reset buffers if entering idle
+            azimuth_buffer.clear()
+            inclination_buffer.clear()
+            waiting_for_stable_measurement = False
+            disco_mode.turn_off()
+
         elif device.current_state == SystemState.TAKING_MEASURMENT:
             if not laser_enabled:
                 sensor_manager.set_laser(True)
                 laser_enabled = True
 
             if not device.measurement_taken:
+                if not waiting_for_stable_measurement:
+                    disco_mode.set_red()
+                    waiting_for_stable_measurement = True
+
                 update_readings(readings)
-                readings.distance = sensor_manager.get_distance() / 100
-                display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
-                ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+                #display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
 
+                # Buffer azimuth and inclination only
+                azimuth_buffer.append(readings.azimuth)
+                inclination_buffer.append(readings.inclination)
 
-                device.measurement_taken = True
+                if len(azimuth_buffer) > 3:
+                    azimuth_buffer.pop(0)
+                    inclination_buffer.pop(0)
 
-        await asyncio.sleep(0.25)
+                if len(azimuth_buffer) == 3:
+                    if is_consistent(azimuth_buffer) and is_consistent(inclination_buffer):
+                        disco_mode.set_green()
+                        sensor_manager.set_buzzer(True)
+
+                        # ✅ Get distance after readings are stable
+                        readings.distance = sensor_manager.get_distance() / 100
+                        display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+                        ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+
+                        device.measurement_taken = True
+                        await asyncio.sleep(0.02)
+                        disco_mode.turn_off()
+                        print("📍 Measurement recorded.")
+
+        await asyncio.sleep(0.02)
 
 
 async def watch_for_button_presses(device):
@@ -241,9 +290,9 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
         await asyncio.sleep(0.01)
 
 async def main():
-    calibration = PerformCalibration(sensor_manager, button_manager, calib)
 
     # Create and start background tasks once
+    calibration = PerformCalibration(sensor_manager, button_manager, calib)
     sensor_reading = asyncio.create_task(sensor_read_display_update(readings, device))
     watch_for_buttons = asyncio.create_task(watch_for_button_presses(device))
     check_battery = asyncio.create_task(check_battery_sensor(readings))
