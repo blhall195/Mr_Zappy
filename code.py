@@ -317,8 +317,6 @@ async def main():
         global display
         display = DisplayManager()
 
-        print("Calibration starting...")
-
         # Perform calibration (blocking)
         await calibration.start_calibration(device, disco_mode)
 

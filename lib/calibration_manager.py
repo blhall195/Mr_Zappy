@@ -14,7 +14,9 @@ class PerformCalibration:
         self.grav_array = []
 
     async def start_calibration(self, device, disco_mode):
-        print("🔧 Starting calibration. Press fire button while rotating the device in all directions.")
+        print("Starting calibration.Press fire button    while rotating the   device in all        directions.")
+        print("")
+        print("")
         sensor_mgr = self.sensor_manager
         button_mgr = self.button_manager
         calib = self.calib
@@ -82,10 +84,16 @@ class PerformCalibration:
 
         gc.collect() #free up a bit of RAM
         mag_accuracy, grav_accuracy = calib.fit_ellipsoid(self.mag_array, self.grav_array)
-        print(f"✅ Mag: {mag_accuracy}")
-        print(f"✅ Grav: {grav_accuracy}")
+        print("")
+        print("")
+        print(f"     Mag: {mag_accuracy}")
+        print(f"     Grav: {grav_accuracy}")
+        print("")
         print("✅ Hold 1+2 to SAVE")
         print("❌ Hold 2 to DISCARD")
+        print("")
+        print("")
+        print("")
         await asyncio.sleep(0.02)
 
         selected = None
@@ -102,13 +110,11 @@ class PerformCalibration:
                 hold_counter += 0.01
                 if hold_counter >= save_hold_time:
                     selected = True
-                    print("\n\nSaving calibration...")
                     await asyncio.sleep(0.5)
             elif not b1 and b2:
                 hold_counter += 0.01
                 if hold_counter >= save_hold_time:
                     selected = False
-                    print("\n\nCalibration not saved.")
                     await asyncio.sleep(0.5)
             else:
                 hold_counter = 0.0  # reset if not holding combo
@@ -121,16 +127,19 @@ class PerformCalibration:
             try:
                 with open("/calibration_dict.json", "w") as f:
                     json.dump(calibration_dict, f)
-                print("✅ Calibration saved.")
+                print("Calibration saved.")
+                print("")
+                print("")
             except Exception as e:
                 print(f"❌ Failed to save calibration: {e}")
+                print("")
+                print("")
             await asyncio.sleep(0.5)
         else:
-            print("⚠ Calibration data discarded.")
-            await asyncio.sleep(0.5)
-
-        print("🎉 Calibration data saved.")
-        await asyncio.sleep(0.5)
+            print("Calibration data     discarded.")
+            print("")
+            print("")
+            await asyncio.sleep(2)
 
         await asyncio.sleep(0.1)
         sensor_mgr.set_buzzer(True)
@@ -139,7 +148,7 @@ class PerformCalibration:
         await asyncio.sleep(0.1)
         sensor_mgr.set_buzzer(True)
         print("")
-        print("Laser alignment, rotate 8 times on target, repeat @ 90 degrees")
+        print("Laser alignment,     rotate 8 times on    target, repeat @ 90  degrees")
         print("")
         print("")
         print("")
@@ -154,7 +163,7 @@ class PerformCalibration:
         grav_buffer = []
         waiting_for_stable_sample = False  # Tracks if we're in measurement mode
 
-        while iteration < 16:
+        while iteration < 2:
 
             button_mgr.update()
 
@@ -211,9 +220,10 @@ class PerformCalibration:
             "grav": [list(g) for g in self.grav_array]
         }
         try:
-            with open("/alignment_mag_grav_data.json", "w") as f:
+            with open("/alignment_data.json", "w") as f:
                 json.dump(raw_data, f)
-            print("📦 Raw sensor data saved.")
+            print("Raw sensor data saved")
+            print("")
         except Exception as e:
             print(f"❌ Failed to save raw data: {e}")
         # --------------------------------------------------
@@ -222,10 +232,9 @@ class PerformCalibration:
             try:
                 with open("/calibration_mode_activate.txt", "w") as f:
                     f.write("1")
-                print("✅ calibration_mode_activate.txt written")
                 await asyncio.sleep(2)  # ⬅️ Give time to flush before reset
             except OSError as e:
-                print(f"❌ Failed to write calibration_mode_activate.txt: {e}")
+                print(f"Failed to write calibration_mode_activate.txt: {e}")
 
         print("resetting device")
         microcontroller.reset()
