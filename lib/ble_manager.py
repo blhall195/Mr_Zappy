@@ -40,3 +40,12 @@ class BleManager:
             except UnicodeDecodeError:
                 return None
         return None
+
+    def send_keep_alive(self):
+        """Send a simple keep-alive message."""
+        message = "ALIVE\n".encode("utf-8")
+        self.drdy.value = True
+        self.uart.write(message)
+        time.sleep(0.05)  # small delay to allow UART to send
+        self.drdy.value = False
+        print("Sent keep-alive")
