@@ -330,7 +330,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
         await asyncio.sleep(0.01)
 
 last_activity_time = 0
-ACTIVITY_TIMEOUT = 30  # seconds
+ACTIVITY_TIMEOUT = 1200  # seconds
 
 def signal_activity():
     global last_activity_time
@@ -343,6 +343,7 @@ async def send_keep_alive_periodically(ble_manager):
         if now - last_activity_time < ACTIVITY_TIMEOUT:
             try:
                 ble_manager.send_keep_alive()
+                print("sending keep alive message")
             except Exception as e:
                 print(f"Error sending keep-alive: {e}")
         await asyncio.sleep(2)  # send every 5 seconds if active
