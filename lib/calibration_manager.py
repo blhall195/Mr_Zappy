@@ -31,7 +31,7 @@ class PerformCalibration:
         grav_buffer = []
         waiting_for_stable_sample = False  # Tracks if we're in measurement mode
 
-        while iteration < 1:
+        while iteration < 56:
             if device.current_state != "CALIBRATING":
                 print("❌ Calibration cancelled during phase 1.")
                 return
@@ -245,6 +245,6 @@ class PerformCalibration:
                 print(f"Failed to write calibration_mode_activate.txt: {e}")
 
         print("Rebooting device")
-        await asyncio.sleep(2)  # ⬅️ Give time to flush before reset
+        await asyncio.sleep(1.5)  # ⬅️ Give time to flush before reset
         microcontroller.reset()
 
