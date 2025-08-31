@@ -31,7 +31,7 @@ class PerformCalibration:
         grav_buffer = []
         waiting_for_stable_sample = False  # Tracks if we're in measurement mode
 
-        while iteration < 16:
+        while iteration < 1:
             if device.current_state != "CALIBRATING":
                 print("❌ Calibration cancelled during phase 1.")
                 return
@@ -164,7 +164,7 @@ class PerformCalibration:
         grav_buffer = []
         waiting_for_stable_sample = False  # Tracks if we're in measurement mode
 
-        while iteration < 16:
+        while iteration < 24:
 
             button_mgr.update()
 
@@ -209,6 +209,13 @@ class PerformCalibration:
                     await asyncio.sleep(0.2)
                     disco_mode.turn_off()
                     waiting_for_stable_sample = False  # Reset for next button press
+                    # Print every 8 readings
+                    if iteration % 8 == 0:
+                        print(f"Change direction...")
+                        sensor_mgr.set_buzzer(True)
+                        sensor_mgr.set_buzzer(True)
+                        sensor_mgr.set_buzzer(True)
+
 
             await asyncio.sleep(0.005)
 
@@ -233,10 +240,11 @@ class PerformCalibration:
             try:
                 with open("/calibration_mode_activate.txt", "w") as f:
                     f.write("1")
-                await asyncio.sleep(2)  # ⬅️ Give time to flush before reset
+                print("Processing...")
             except OSError as e:
                 print(f"Failed to write calibration_mode_activate.txt: {e}")
 
-        print("resetting device")
+        print("Rebooting device")
+        await asyncio.sleep(2)  # ⬅️ Give time to flush before reset
         microcontroller.reset()
 
