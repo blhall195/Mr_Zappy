@@ -3,9 +3,11 @@ import board
 import neopixel
 import math
 import asyncio
+import random
 
 class DiscoMode:
-    def __init__(self, pixel_pin=board.NEOPIXEL, num_pixels=1, brightness=1.0):
+    def __init__(self, sensor_manager, pixel_pin=board.NEOPIXEL, num_pixels=1, brightness=1.0):
+        self.sensor_manager = sensor_manager
         self.pixel_pin = pixel_pin
         self.num_pixels = num_pixels
         self.brightness = max(0.0, min(1.0, brightness))
@@ -46,11 +48,11 @@ class DiscoMode:
         self.pixels.show()
 
     def _stop_disco(self):
-        """Stop the disco effect if running."""
         if self.is_active:
             self.is_active = False
             if self.task is not None:
-                self.loop.run_until_complete(self.task)
+                self.task.cancel()
+                self.task = None
 
     def start_disco(self):
         """Start the disco (rainbow) effect."""
@@ -60,19 +62,48 @@ class DiscoMode:
             self.task = self.loop.create_task(self._run_disco_effect())
 
     async def _run_disco_effect(self):
-        """Run the rainbow effect."""
+        """Run the rainbow effect with latched wild mode based on gravity."""
+        base_sleep = 0.1
+        wild_sleep = 0.1
+        color_step_base = 10
+
+        j = 0
+        self.wild_latched = False  # latch flag
+
         while self.is_active:
-            for j in range(0, 360, 10):
-                if not self.is_active:
-                    break
-                hue = j / 360.0
-                color = self.hsv_to_rgb(hue, 1.0, 1.0)
-                color = self._apply_brightness(*color)
-                self.pixels.fill(color)
-                self.pixels.show()
-                await asyncio.sleep(0.1)
+            # Continuously sample gravity
+            grav = self.sensor_manager.get_grav()
+            gx, gy, gz = grav if grav else (0, 0, 0)
+
+            # Trigger wild mode once if any axis exceeds ~1.1g
+            if not self.wild_latched and (abs(gx) > 11 or abs(gy) > 11 or abs(gz) > 11):
+                self.wild_latched = True
+                print("🔥 Wild mode latched ON!")
+
+            is_wild = self.wild_latched
+            sleep_time = wild_sleep if is_wild else base_sleep
+
+            # Choose color
+            if is_wild:
+                hue = random.random()  # random hue between 0.0–1.0
+            else:
+                hue = (j % 360) / 360.0
+                j += color_step_base
+
+            # Apply color
+            color = self.hsv_to_rgb(hue, 1.0, 1.0)
+            color = self._apply_brightness(*color)
+            self.pixels.fill(color)
+            self.pixels.show()
+
+            print(f"Gravity: ({gx:.2f}, {gy:.2f}, {gz:.2f}) | Wild Mode: {is_wild}")
+
+            await asyncio.sleep(sleep_time)
+
+        # Turn off LED when done
         self.pixels.fill((0, 0, 0))
         self.pixels.show()
+        self.wild_latched = False  # Reset for next run
 
     def hsv_to_rgb(self, h, s, v):
         """Convert HSV to RGB."""

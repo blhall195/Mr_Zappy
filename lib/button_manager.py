@@ -19,7 +19,7 @@ class ButtonManager:
             io = digitalio.DigitalInOut(pin)
             io.direction = digitalio.Direction.INPUT
             io.pull = digitalio.Pull.UP
-            debounced = Debouncer(io)
+            debounced = Debouncer(io, interval=0.01)
             self.buttons[name] = debounced
 
     def update(self):

@@ -56,6 +56,14 @@ class DisplayManager:
     def update_sensor_readings(self, distance, azimuth, inclination):
         if distance == 0:
             self.distance_label.text = ""
+        elif isinstance(distance, str) and distance == "ERR":
+            self.distance_label.text = "ERR"
+        elif isinstance(distance, str) and distance == "Mag ERR":
+            self.distance_label.text = "Mag ERR"
+        elif isinstance(distance, str) and distance == "Grav ERR":
+            self.distance_label.text = "Grav ERR"
+        elif isinstance(distance, str) and distance == "Dip ERR":
+            self.distance_label.text = "Dip ERR"
         else:
             self.distance_label.text = f"{distance:.2f}m"
 

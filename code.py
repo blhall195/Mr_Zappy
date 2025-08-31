@@ -12,7 +12,7 @@ from sensor_manager import SensorManager
 from button_manager import ButtonManager
 from display_manager import DisplayManager
 from calibration_manager import PerformCalibration
-from mag_cal.calibration import Calibration
+from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError
 from ble_manager import BleManager
 from disco_manager import DiscoMode
 import json
@@ -30,7 +30,7 @@ sensor_manager = SensorManager()
 button_manager = ButtonManager()
 display = DisplayManager()
 ble = BleManager()
-disco_mode = DiscoMode()
+disco_mode = DiscoMode(sensor_manager, brightness=1)
 calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
 
 # A class for storing device readings
@@ -49,6 +49,7 @@ class SystemState():
     IDLE = "IDLE"
     TAKING_MEASURMENT = "TAKING_MEASURMENT"
     CALIBRATING = "CALIBRATING"
+    DISPLAYING = "DISPLAYING"
 
 system_state = SystemState()
 
@@ -128,20 +129,22 @@ async def sensor_read_display_update(readings, device):
             azimuth_buffer.clear()
             inclination_buffer.clear()
             waiting_for_stable_measurement = False
-            disco_mode.turn_off()
 
         elif device.current_state == SystemState.TAKING_MEASURMENT:
+
+            disco_mode.turn_off()
+            disco_mode.set_red()
+
             if not laser_enabled:
                 sensor_manager.set_laser(True)
                 laser_enabled = True
 
             if not device.measurement_taken:
                 if not waiting_for_stable_measurement:
-                    disco_mode.set_red()
+                    print("wait")
                     waiting_for_stable_measurement = True
 
                 update_readings(readings)
-                #display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
 
                 # Buffer azimuth and inclination only
                 azimuth_buffer.append(readings.azimuth)
@@ -156,50 +159,64 @@ async def sensor_read_display_update(readings, device):
                         disco_mode.set_green()
                         sensor_manager.set_buzzer(True)
 
-                        # ✅ Get distance after readings are stable
-                        readings.distance = sensor_manager.get_distance() / 100
+                        #Get reading if readings are stable
+                        try:
+                            distance_cm = sensor_manager.get_distance()
+                            if distance_cm is None or not isinstance(distance_cm, (int, float)):
+                                raise ValueError("Invalid distance reading")
+                            readings.distance = distance_cm / 100
+                            ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+                        except Exception as e:
+                            print(f"❌ Distance read failed: {e}")
+                            readings.distance = "ERR"
                         display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
-                        ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+
+                        # 🚨 Anomaly check
+                        try:
+                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav())
+                        except MagneticAnomalyError:
+                            print("❌ Magnetic anomaly detected")
+                            readings.distance = "Mag ERR"
+                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+                            disco_mode.set_red()
+                            device.measurement_taken = True
+                        except GravityAnomalyError:
+                            print("❌ Gravity anomaly detected – likely motion")
+                            readings.distance = "Grav ERR"
+                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+                            disco_mode.set_red()
+                            device.measurement_taken = True
+                        except DipAnomalyError:
+                            print("❌ Dip angle anomaly detected")
+                            readings.distance = "Dip ERR"
+                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+                            disco_mode.set_red()
+                            device.measurement_taken = True
 
                         device.measurement_taken = True
                         await asyncio.sleep(0.02)
                         disco_mode.turn_off()
                         print("📍 Measurement recorded.")
+                        device.current_state = SystemState.DISPLAYING
 
-        await asyncio.sleep(0.02)
+        if device.current_state == SystemState.IDLE:
+            await asyncio.sleep(0.5)  # faster loop for active measuring
+        elif device.current_state == SystemState.DISPLAYING:
+            await asyncio.sleep(0.5)  # faster loop for active measuring
 
 
 async def watch_for_button_presses(device):
-    both_pressed_start = None
+    calibrate_button_start = None
     disco_on = False
 
     while True:
         button_manager.update()
 
         # Detect if both buttons are pressed simultaneously
-        button1_pressed = button_manager.is_pressed("Button 1")  # Assuming you have is_pressed method
+        button1_pressed = button_manager.is_pressed("Button 1")
         button2_pressed = button_manager.is_pressed("Button 2")
 
-        if button1_pressed and button2_pressed:
-            if both_pressed_start is None:
-                both_pressed_start = time.monotonic()
-            else:
-                held_time = time.monotonic() - both_pressed_start
-                if held_time >= 3.0:
-                    # Toggle disco mode
-                    if disco_on:
-                        disco_mode.turn_off()
-                        disco_on = False
-                        print("Disco mode OFF (buttons held 3s)")
-                    else:
-                        disco_mode.start_disco()
-                        disco_on = True
-                        print("Disco mode ON (buttons held 3s)")
-                    both_pressed_start = None  # Reset to prevent repeated toggling
-        else:
-            both_pressed_start = None  # Reset timer if buttons not pressed together
-
-        # Your existing single button logic:
+        #Button 1 logic:
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
             if device.current_state == "IDLE":
@@ -209,14 +226,34 @@ async def watch_for_button_presses(device):
                 print("System busy, ignoring button press.")
                 device.current_state = "IDLE"
 
-        elif button_manager.was_pressed("Button 2"):
-            if device.current_state == "IDLE":
-                print("Entering calibration mode")
-                device.current_state = "CALIBRATING"
+        #Button 2 logic:
+        if button_manager.was_pressed("Button 2"):
+            if disco_on:
+                disco_mode.turn_off()
+                disco_on = False
+                print("Disco mode OFF (Button 2 pressed)")
             else:
-                print("System busy, can't calibrate now.")
+                disco_mode.start_disco()
+                disco_on = True
+                print("Disco mode ON (Button 2 pressed)")
 
-        await asyncio.sleep(0.01)
+        #Button 2 hold for calibration mode logic
+        if button2_pressed:
+            if calibrate_button_start is None:
+                calibrate_button_start = time.monotonic()
+            else:
+                held_time = time.monotonic() - calibrate_button_start
+                if held_time >= 3.0:
+                    if device.current_state == SystemState.IDLE:
+                        print("Entering calibration mode (Button 2 held 3s)")
+                        device.current_state = SystemState.CALIBRATING
+                    else:
+                        print("System busy, can't calibrate now.")
+                    calibrate_button_start = None  # Prevent multiple triggers
+        else:
+            calibrate_button_start = None  # Reset if Button 2 released
+
+        await asyncio.sleep(0.001)
 
 
 
@@ -225,7 +262,7 @@ def update_readings(readings,):
         readings.azimuth, readings.inclination, readings.roll = readings.calib_updated.get_angles(
             sensor_manager.get_mag(), sensor_manager.get_grav()
         )
-        print(f"({readings.azimuth})")
+        #print(f"({readings.azimuth})")
 
     except Exception as e:
         print(e)
@@ -305,6 +342,7 @@ async def main():
             await asyncio.sleep(0.1)
 
         # Calibration triggered: stop background tasks
+        disco_mode.turn_off()
         sensor_reading.cancel()
         watch_for_buttons.cancel()
         check_battery.cancel()
