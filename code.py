@@ -346,7 +346,7 @@ async def send_keep_alive_periodically(ble_manager):
                 print("sending keep alive message")
             except Exception as e:
                 print(f"Error sending keep-alive: {e}")
-        await asyncio.sleep(2)  # send every 5 seconds if active
+        await asyncio.sleep(5)  # send every 5 seconds if active
         print(time.monotonic())
 
 async def main():
