@@ -243,19 +243,14 @@ async def watch_for_button_presses(device):
                 calibrate_button_start = time.monotonic()
             else:
                 held_time = time.monotonic() - calibrate_button_start
-                if held_time >= 3.0:
-                    if device.current_state == SystemState.IDLE:
-                        print("Entering calibration mode (Button 2 held 3s)")
-                        device.current_state = SystemState.CALIBRATING
-                    else:
-                        print("System busy, can't calibrate now.")
-                    calibrate_button_start = None  # Prevent multiple triggers
-        else:
-            calibrate_button_start = None  # Reset if Button 2 released
+                if held_time >= 3.0 and device.current_state == SystemState.IDLE:
+                    print("Entering calibration mode (Button 2 held 3s)")
+                    device.current_state = SystemState.CALIBRATING
+                    calibrate_button_start = None  # reset to prevent repeated triggers
+        elif calibrate_button_start is not None:
+            calibrate_button_start = None  # Reset when button released
 
-        await asyncio.sleep(0.001)
-
-
+        await asyncio.sleep(0.005)
 
 def update_readings(readings,):
     try:
@@ -346,8 +341,17 @@ async def main():
         sensor_reading.cancel()
         watch_for_buttons.cancel()
         check_battery.cancel()
+        monitor_ble.cancel()
+        monitor_ble_uart_task.cancel()
+
         try:
-            await asyncio.gather(sensor_reading, watch_for_buttons, check_battery)
+            await asyncio.gather(
+                sensor_reading,
+                watch_for_buttons,
+                check_battery,
+                monitor_ble,
+                monitor_ble_uart_task
+            )
         except asyncio.CancelledError:
             pass  # Expected on cancel
 
