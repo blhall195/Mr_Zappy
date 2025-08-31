@@ -224,6 +224,7 @@ async def watch_for_button_presses(device):
         #Button 1 logic:
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
+            signal_activity()
             if device.current_state == "IDLE":
                 device.current_state = "TAKING_MEASURMENT"
                 device.measurement_taken = False
@@ -233,6 +234,7 @@ async def watch_for_button_presses(device):
 
         #Button 2 logic:
         if button_manager.was_pressed("Button 2"):
+            signal_activity()
             if disco_on:
                 disco_mode.turn_off()
                 disco_on = False
@@ -244,6 +246,7 @@ async def watch_for_button_presses(device):
 
         #Button 2 hold for calibration mode logic
         if button2_pressed:
+            signal_activity()
             if calibrate_button_start is None:
                 calibrate_button_start = time.monotonic()
             else:
@@ -326,6 +329,25 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
 
         await asyncio.sleep(0.01)
 
+last_activity_time = 0
+ACTIVITY_TIMEOUT = 30  # seconds
+
+def signal_activity():
+    global last_activity_time
+    last_activity_time = time.monotonic()
+
+async def send_keep_alive_periodically(ble_manager):
+    global last_activity_time
+    while True:
+        now = time.monotonic()
+        if now - last_activity_time < ACTIVITY_TIMEOUT:
+            try:
+                ble_manager.send_keep_alive()
+            except Exception as e:
+                print(f"Error sending keep-alive: {e}")
+        await asyncio.sleep(2)  # send every 5 seconds if active
+        print(time.monotonic())
+
 async def main():
 
     # Create and start background tasks once
@@ -335,6 +357,7 @@ async def main():
     check_battery = asyncio.create_task(check_battery_sensor(readings))
     monitor_ble = asyncio.create_task(monitor_ble_pin(device))
     monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
+    keep_alive_task = asyncio.create_task(send_keep_alive_periodically(ble))
 
     while True:
         # Wait until calibration is triggered
@@ -382,11 +405,5 @@ async def main():
         monitor_ble = asyncio.create_task(monitor_ble_pin(device))
         monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
 
-
 asyncio.run(main())
-
-# # Print calibration data to confirm
-# calibration_dict = calib_updated.as_dict()
-# print(calibration_dict)
-#display.blank_screen()
 
