@@ -31,7 +31,7 @@ class PerformCalibration:
         grav_buffer = []
         waiting_for_stable_sample = False  # Tracks if we're in measurement mode
 
-        while iteration < 2:
+        while iteration < 16:
             if device.current_state != "CALIBRATING":
                 print("❌ Calibration cancelled during phase 1.")
                 return
@@ -74,25 +74,26 @@ class PerformCalibration:
                     self.mag_array.append(mag_data)
                     self.grav_array.append(grav_data)
                     iteration += 1
-                    print(f"Calib Point: {iteration}/16")
+                    print(f"Calib Point: {iteration}/56")
                     sensor_mgr.set_buzzer(True)
                     await asyncio.sleep(0.2)  # Allow time for user to register feedback
                     disco_mode.turn_off()  # ✅ Turn off LED after success
                     waiting_for_stable_sample = False  # ✅ Reset for next button press
 
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.005)
 
         gc.collect() #free up a bit of RAM
         mag_accuracy, grav_accuracy = calib.fit_ellipsoid(self.mag_array, self.grav_array)
+        calib.set_field_characteristics(self.mag_array, self.grav_array)
+        calib.set_expected_mean_dip(self.mag_array, self.grav_array)
         print("")
         print("")
-        print(f"     Mag: {mag_accuracy}")
-        print(f"     Grav: {grav_accuracy}")
+        print(f"  Mag: {mag_accuracy}")
+        print(f"  Grav: {grav_accuracy}")
         print("")
         print("✅ Hold 1+2 to SAVE")
         print("❌ Hold 2 to DISCARD")
-        print("")
-        print("")
+        print("Lower = Better")
         print("")
         await asyncio.sleep(0.02)
 
@@ -163,7 +164,7 @@ class PerformCalibration:
         grav_buffer = []
         waiting_for_stable_sample = False  # Tracks if we're in measurement mode
 
-        while iteration < 2:
+        while iteration < 16:
 
             button_mgr.update()
 
@@ -209,7 +210,7 @@ class PerformCalibration:
                     disco_mode.turn_off()
                     waiting_for_stable_sample = False  # Reset for next button press
 
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.005)
 
 
         # --------------------------------------------------
