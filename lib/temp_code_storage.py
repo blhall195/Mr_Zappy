@@ -1,8 +1,3 @@
-import os
-
-if "calibration_mode_activate.txt" in os.listdir("/"):
-    import calibration_alignment
-
 import asyncio
 import board
 import digitalio
@@ -12,7 +7,7 @@ from sensor_manager import SensorManager
 from button_manager import ButtonManager
 from display_manager import DisplayManager
 from calibration_manager import PerformCalibration
-from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError, Strictness
+from mag_cal.calibration import Calibration
 from ble_manager import BleManager
 from disco_manager import DiscoMode
 import json
@@ -26,53 +21,19 @@ try:
 except Exception as e:
     print(f"❌ Failed to patch align_sensor_roll: {e}")
 
+# Create instances
+calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
+
+with open("/calibration_dict.json", "r") as f:
+    calibration_dict = json.load(f)
+
+calib = calib.from_dict(calibration_dict)
+
 sensor_manager = SensorManager()
 button_manager = ButtonManager()
 display = DisplayManager()
 ble = BleManager()
-disco_mode = DiscoMode(sensor_manager, brightness=1)
-calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
-
-# A class for storing device readings
-class Readings:
-    def __init__(self):
-        self.azimuth = 0
-        self.inclination = 0
-        self.roll = 0
-        self.distance = 0
-        self.calib_updated = None
-        self.battery_level = 0
-readings = Readings()
-
-#class for storing system states
-class SystemState():
-    IDLE = "IDLE"
-    TAKING_MEASURMENT = "TAKING_MEASURMENT"
-    CALIBRATING = "CALIBRATING"
-    DISPLAYING = "DISPLAYING"
-
-system_state = SystemState()
-
-#class for updating system states
-class DeviceContext:
-    def __init__(self):
-        self.current_state = SystemState.IDLE
-        self.readings = Readings()
-        self.measurement_taken = False  # NEW FLAG
-
-device = DeviceContext()
-device.current_state = SystemState.IDLE
-
-try:
-    with open("/calibration_dict.json", "r") as f:
-        calibration_dict = json.load(f)
-    calib = calib.from_dict(calibration_dict)
-    readings.calib_updated = calib.from_dict(calibration_dict)
-except OSError:
-    print("Calibration file not found, using default calibration.")
-    calibration = PerformCalibration(sensor_manager, button_manager, calib)
-    asyncio.run(calibration.start_calibration(device, disco_mode))
-    device.current_state = "CALIBRATING"
+disco_mode = DiscoMode()
 
 COMMANDS = {
     "ACK0": 0x55,
@@ -90,6 +51,36 @@ display.display_screen_initialise()
 ble_status_pin = digitalio.DigitalInOut(board.D11)
 ble_status_pin.direction = digitalio.Direction.INPUT
 ble_status_pin.pull = digitalio.Pull.DOWN
+
+# A class for storing device readings
+class Readings:
+    def __init__(self):
+        self.azimuth = 0
+        self.inclination = 0
+        self.roll = 0
+        self.distance = 0
+        self.calib_updated = None
+        self.battery_level = 0
+readings = Readings()
+readings.calib_updated = calib.from_dict(calibration_dict)
+
+#class for storing system states
+class SystemState():
+    IDLE = "IDLE"
+    TAKING_MEASURMENT = "TAKING_MEASURMENT"
+    CALIBRATING = "CALIBRATING"
+
+system_state = SystemState()
+
+#class for updating system states
+class DeviceContext:
+    def __init__(self):
+        self.current_state = SystemState.IDLE
+        self.readings = Readings()
+        self.measurement_taken = False  # NEW FLAG
+
+device = DeviceContext()
+device.current_state = SystemState.IDLE
 
 
 async def sensor_read_display_update(readings, device):
@@ -111,7 +102,6 @@ async def sensor_read_display_update(readings, device):
     waiting_for_stable_measurement = False
     laser_enabled = False
     prev_azimuth = None
-    current_disco_color = None
 
     while True:
         if device.current_state == SystemState.IDLE:
@@ -130,24 +120,20 @@ async def sensor_read_display_update(readings, device):
             azimuth_buffer.clear()
             inclination_buffer.clear()
             waiting_for_stable_measurement = False
+            disco_mode.turn_off()
 
         elif device.current_state == SystemState.TAKING_MEASURMENT:
-
-            if current_disco_color != "red":
-                disco_mode.turn_off()
-                disco_mode.set_red()
-                current_disco_color = "red"
-
             if not laser_enabled:
                 sensor_manager.set_laser(True)
                 laser_enabled = True
 
             if not device.measurement_taken:
                 if not waiting_for_stable_measurement:
-                    print("wait")
+                    disco_mode.set_red()
                     waiting_for_stable_measurement = True
 
                 update_readings(readings)
+                #display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
 
                 # Buffer azimuth and inclination only
                 azimuth_buffer.append(readings.azimuth)
@@ -162,69 +148,52 @@ async def sensor_read_display_update(readings, device):
                         disco_mode.set_green()
                         sensor_manager.set_buzzer(True)
 
-                        #Get reading if readings are stable
-                        try:
-                            distance_cm = sensor_manager.get_distance()
-                            if distance_cm is None or not isinstance(distance_cm, (int, float)):
-                                raise ValueError("Invalid distance reading")
-                            readings.distance = distance_cm / 100
-                            ble.send_message(readings.azimuth, readings.inclination, readings.distance)
-                        except Exception as e:
-                            print(f"❌ Distance read failed: {e}")
-                            readings.distance = "ERR"
+                        # ✅ Get distance after readings are stable
+                        readings.distance = sensor_manager.get_distance() / 100
                         display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
-
-                        # 🚨 Anomaly check
-                        try:
-                            strictness = Strictness(mag=5.0, grav=5.0, dip=3.0)
-                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(),strictness = strictness)
-                        except MagneticAnomalyError:
-                            print("❌ Magnetic anomaly detected")
-                            readings.distance = "Mag ERR"
-                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
-                            disco_mode.set_red()
-                            device.measurement_taken = True
-                        except GravityAnomalyError:
-                            print("❌ Gravity anomaly detected – likely motion")
-                            readings.distance = "Grav ERR"
-                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
-                            disco_mode.set_red()
-                            device.measurement_taken = True
-                        except DipAnomalyError:
-                            print("❌ Dip angle anomaly detected")
-                            readings.distance = "Dip ERR"
-                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
-                            disco_mode.set_red()
-                            device.measurement_taken = True
+                        ble.send_message(readings.azimuth, readings.inclination, readings.distance)
 
                         device.measurement_taken = True
                         await asyncio.sleep(0.02)
                         disco_mode.turn_off()
                         print("📍 Measurement recorded.")
-                        current_disco_color = None
-                        device.current_state = SystemState.DISPLAYING
 
-        if device.current_state == SystemState.IDLE:
-            await asyncio.sleep(0.5)  # faster loop for active measuring
-        elif device.current_state == SystemState.DISPLAYING:
-            await asyncio.sleep(0.5)  # faster loop for active measuring
+        await asyncio.sleep(0.02)
 
 
 async def watch_for_button_presses(device):
-    calibrate_button_start = None
+    both_pressed_start = None
     disco_on = False
 
     while True:
         button_manager.update()
 
         # Detect if both buttons are pressed simultaneously
-        button1_pressed = button_manager.is_pressed("Button 1")
+        button1_pressed = button_manager.is_pressed("Button 1")  # Assuming you have is_pressed method
         button2_pressed = button_manager.is_pressed("Button 2")
 
-        #Button 1 logic:
+        if button1_pressed and button2_pressed:
+            if both_pressed_start is None:
+                both_pressed_start = time.monotonic()
+            else:
+                held_time = time.monotonic() - both_pressed_start
+                if held_time >= 3.0:
+                    # Toggle disco mode
+                    if disco_on:
+                        disco_mode.turn_off()
+                        disco_on = False
+                        print("Disco mode OFF (buttons held 3s)")
+                    else:
+                        disco_mode.start_disco()
+                        disco_on = True
+                        print("Disco mode ON (buttons held 3s)")
+                    both_pressed_start = None  # Reset to prevent repeated toggling
+        else:
+            both_pressed_start = None  # Reset timer if buttons not pressed together
+
+        # Your existing single button logic:
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
-            signal_activity()
             if device.current_state == "IDLE":
                 device.current_state = "TAKING_MEASURMENT"
                 device.measurement_taken = False
@@ -232,40 +201,23 @@ async def watch_for_button_presses(device):
                 print("System busy, ignoring button press.")
                 device.current_state = "IDLE"
 
-        #Button 2 logic:
-        if button_manager.was_pressed("Button 2"):
-            signal_activity()
-            if disco_on:
-                disco_mode.turn_off()
-                disco_on = False
-                print("Disco mode OFF (Button 2 pressed)")
+        elif button_manager.was_pressed("Button 2"):
+            if device.current_state == "IDLE":
+                print("Entering calibration mode")
+                device.current_state = "CALIBRATING"
             else:
-                disco_mode.start_disco()
-                disco_on = True
-                print("Disco mode ON (Button 2 pressed)")
+                print("System busy, can't calibrate now.")
 
-        #Button 2 hold for calibration mode logic
-        if button2_pressed:
-            signal_activity()
-            if calibrate_button_start is None:
-                calibrate_button_start = time.monotonic()
-            else:
-                held_time = time.monotonic() - calibrate_button_start
-                if held_time >= 3.0 and device.current_state == SystemState.IDLE:
-                    print("Entering calibration mode (Button 2 held 3s)")
-                    device.current_state = SystemState.CALIBRATING
-                    calibrate_button_start = None  # reset to prevent repeated triggers
-        elif calibrate_button_start is not None:
-            calibrate_button_start = None  # Reset when button released
+        await asyncio.sleep(0.01)
 
-        await asyncio.sleep(0.001)
+
 
 def update_readings(readings,):
     try:
         readings.azimuth, readings.inclination, readings.roll = readings.calib_updated.get_angles(
             sensor_manager.get_mag(), sensor_manager.get_grav()
         )
-        #print(f"({readings.azimuth})")
+        print(f"({readings.azimuth})")
 
     except Exception as e:
         print(e)
@@ -329,26 +281,6 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
 
         await asyncio.sleep(0.01)
 
-last_activity_time = 0
-ACTIVITY_TIMEOUT = 1200  # seconds
-
-def signal_activity():
-    global last_activity_time
-    last_activity_time = time.monotonic()
-
-async def send_keep_alive_periodically(ble_manager):
-    global last_activity_time
-    while True:
-        now = time.monotonic()
-        if now - last_activity_time < ACTIVITY_TIMEOUT:
-            try:
-                ble_manager.send_keep_alive()
-                print("sending keep alive message")
-            except Exception as e:
-                print(f"Error sending keep-alive: {e}")
-        await asyncio.sleep(2)  # send every 5 seconds if active
-        print(time.monotonic())
-
 async def main():
 
     # Create and start background tasks once
@@ -358,7 +290,6 @@ async def main():
     check_battery = asyncio.create_task(check_battery_sensor(readings))
     monitor_ble = asyncio.create_task(monitor_ble_pin(device))
     monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
-    keep_alive_task = asyncio.create_task(send_keep_alive_periodically(ble))
 
     while True:
         # Wait until calibration is triggered
@@ -366,28 +297,19 @@ async def main():
             await asyncio.sleep(0.1)
 
         # Calibration triggered: stop background tasks
-        disco_mode.turn_off()
         sensor_reading.cancel()
         watch_for_buttons.cancel()
         check_battery.cancel()
-        monitor_ble.cancel()
-        monitor_ble_uart_task.cancel()
-        print("turned off stuff")
-
         try:
-            await asyncio.gather(
-                sensor_reading,
-                watch_for_buttons,
-                check_battery,
-                monitor_ble,
-                monitor_ble_uart_task
-            )
+            await asyncio.gather(sensor_reading, watch_for_buttons, check_battery)
         except asyncio.CancelledError:
             pass  # Expected on cancel
 
         # Re-initialize display if needed
         global display
         display = DisplayManager()
+
+        print("Calibration starting...")
 
         # Perform calibration (blocking)
         await calibration.start_calibration(device, disco_mode)
@@ -406,5 +328,11 @@ async def main():
         monitor_ble = asyncio.create_task(monitor_ble_pin(device))
         monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
 
+
 asyncio.run(main())
+
+# # Print calibration data to confirm
+# calibration_dict = calib_updated.as_dict()
+# print(calibration_dict)
+#display.blank_screen()
 
