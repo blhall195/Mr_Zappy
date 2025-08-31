@@ -12,7 +12,7 @@ from sensor_manager import SensorManager
 from button_manager import ButtonManager
 from display_manager import DisplayManager
 from calibration_manager import PerformCalibration
-from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError
+from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError, Strictness
 from ble_manager import BleManager
 from disco_manager import DiscoMode
 import json
@@ -111,6 +111,7 @@ async def sensor_read_display_update(readings, device):
     waiting_for_stable_measurement = False
     laser_enabled = False
     prev_azimuth = None
+    current_disco_color = None
 
     while True:
         if device.current_state == SystemState.IDLE:
@@ -132,8 +133,10 @@ async def sensor_read_display_update(readings, device):
 
         elif device.current_state == SystemState.TAKING_MEASURMENT:
 
-            disco_mode.turn_off()
-            disco_mode.set_red()
+            if current_disco_color != "red":
+                disco_mode.turn_off()
+                disco_mode.set_red()
+                current_disco_color = "red"
 
             if not laser_enabled:
                 sensor_manager.set_laser(True)
@@ -173,7 +176,8 @@ async def sensor_read_display_update(readings, device):
 
                         # 🚨 Anomaly check
                         try:
-                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav())
+                            strictness = Strictness(mag=5.0, grav=5.0, dip=3.0)
+                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(),strictness = strictness)
                         except MagneticAnomalyError:
                             print("❌ Magnetic anomaly detected")
                             readings.distance = "Mag ERR"
@@ -197,6 +201,7 @@ async def sensor_read_display_update(readings, device):
                         await asyncio.sleep(0.02)
                         disco_mode.turn_off()
                         print("📍 Measurement recorded.")
+                        current_disco_color = None
                         device.current_state = SystemState.DISPLAYING
 
         if device.current_state == SystemState.IDLE:
@@ -250,7 +255,7 @@ async def watch_for_button_presses(device):
         elif calibrate_button_start is not None:
             calibrate_button_start = None  # Reset when button released
 
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.001)
 
 def update_readings(readings,):
     try:
@@ -343,6 +348,7 @@ async def main():
         check_battery.cancel()
         monitor_ble.cancel()
         monitor_ble_uart_task.cancel()
+        print("turned off stuff")
 
         try:
             await asyncio.gather(
