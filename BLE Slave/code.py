@@ -81,6 +81,18 @@ async def read_uart_loop():
                 while b'\n' in line_buffer:
                     line, line_buffer = line_buffer.split(b'\n', 1)
                     parsed = parse_uart_line(line)
+
+                    # Decode the line for keep-alive check
+                    decoded_line = line.decode("utf-8").strip()
+
+                    #Detect keep-alive message here
+                    if decoded_line == "ALIVE":
+                        print("Keep-alive received via UART")
+                        # Update timestamp or trigger logic here
+                        global last_activity_time
+                        last_activity_time = time.monotonic()
+                        continue  # optionally skip further processing
+
                     if parsed:
                         compass, clino, distance = parsed
                         print(f"Received: compass={compass}, clino={clino}, distance={distance}")
@@ -162,6 +174,21 @@ async def monitor_buttons(buttons, device):
 
         await asyncio.sleep(0.1)
 
+last_activity_time = 0
+
+async def keep_alive_watchdog(device, timeout=60):
+    global last_activity_time
+    check_interval = 1  # how often to check (in seconds)
+
+    while True:
+        now = time.monotonic()
+        if now - last_activity_time > timeout:
+            print("⚠️ Keep-alive timeout! Going to sleep...")
+            device.change_state("Sleep")
+            break  # Exit loop to allow main() to sleep
+        await asyncio.sleep(check_interval)
+        print(now)
+
 # Main entry
 async def main():
     buttons = ButtonManager()
@@ -172,6 +199,7 @@ async def main():
         asyncio.create_task(poll_ble_loop()),
         asyncio.create_task(monitor_buttons(buttons, device)),
         asyncio.create_task(monitor_ble_connection(device)),
+        asyncio.create_task(keep_alive_watchdog(device)),
     ]
 
     while True:
