@@ -204,7 +204,7 @@ class PerformCalibration:
                     self.mag_array.append(mag_data)
                     self.grav_array.append(grav_data)
                     iteration += 1
-                    print(f"Align Point {iteration}/16")
+                    print(f"Align Point {iteration}/24")
                     sensor_mgr.set_buzzer(True)
                     await asyncio.sleep(0.2)
                     disco_mode.turn_off()
