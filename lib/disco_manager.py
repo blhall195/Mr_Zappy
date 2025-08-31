@@ -63,9 +63,9 @@ class DiscoMode:
 
     async def _run_disco_effect(self):
         """Run the rainbow effect with latched wild mode based on gravity."""
-        base_sleep = 0.1
+        base_sleep = 0.2
         wild_sleep = 0.1
-        color_step_base = 10
+        color_step_base = 20
 
         j = 0
         self.wild_latched = False  # latch flag
@@ -96,7 +96,7 @@ class DiscoMode:
             self.pixels.fill(color)
             self.pixels.show()
 
-            print(f"Gravity: ({gx:.2f}, {gy:.2f}, {gz:.2f}) | Wild Mode: {is_wild}")
+            #print(f"Gravity: ({gx:.2f}, {gy:.2f}, {gz:.2f}) | Wild Mode: {is_wild}")
 
             await asyncio.sleep(sleep_time)
 
