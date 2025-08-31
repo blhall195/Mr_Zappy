@@ -48,4 +48,4 @@ class BleManager:
         self.uart.write(message)
         time.sleep(0.05)  # small delay to allow UART to send
         self.drdy.value = False
-        print("Sent keep-alive")
+
