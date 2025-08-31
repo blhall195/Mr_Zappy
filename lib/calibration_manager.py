@@ -82,6 +82,12 @@ class PerformCalibration:
 
             await asyncio.sleep(0.005)
 
+        await asyncio.sleep(0.1)
+        sensor_mgr.set_buzzer(True)
+        await asyncio.sleep(0.1)
+        sensor_mgr.set_buzzer(True)
+        await asyncio.sleep(0.1)
+        sensor_mgr.set_buzzer(True)
         gc.collect() #free up a bit of RAM
         mag_accuracy, grav_accuracy = calib.fit_ellipsoid(self.mag_array, self.grav_array)
         calib.set_field_characteristics(self.mag_array, self.grav_array)
@@ -142,12 +148,7 @@ class PerformCalibration:
             print("")
             await asyncio.sleep(2)
 
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
+
         print("")
         print("Laser alignment,     rotate 8 times on    target, repeat @ 90  degrees")
         print("")
@@ -219,7 +220,12 @@ class PerformCalibration:
 
             await asyncio.sleep(0.005)
 
-
+        await asyncio.sleep(0.1)
+        sensor_mgr.set_buzzer(True)
+        await asyncio.sleep(0.1)
+        sensor_mgr.set_buzzer(True)
+        await asyncio.sleep(0.1)
+        sensor_mgr.set_buzzer(True)
         # --------------------------------------------------
         # Save data for reboot
         # Build and save raw data to its own dict and file
