@@ -163,12 +163,21 @@ class Device:
             print("✅ Device is now Active.")
 
 # Monitor button presses
-async def monitor_buttons(buttons, device):
+async def monitor_buttons(buttons, device, uart):
     while True:
         buttons.update()
 
         if buttons.was_pressed("Button 1"):
             print("Button 1 pressed!")
+
+            try:
+                # 🔻 Send "Shutting_Down" as a UTF-8 string over UART
+                uart.write("Shutting_Down\n".encode("utf-8"))
+                print("📤 Sent 'Shutting_Down' over UART")
+            except Exception as e:
+                print(f"⚠️ UART send failed: {e}")
+
+            await asyncio.sleep(5)
             device.change_state("Sleep")
             print(f"Current state: {device.device_state}")
 
@@ -176,18 +185,17 @@ async def monitor_buttons(buttons, device):
 
 last_activity_time = 0
 
-async def keep_alive_watchdog(device, timeout=60):
+async def keep_alive_watchdog(device, timeout=900):
     global last_activity_time
     check_interval = 1  # how often to check (in seconds)
 
     while True:
         now = time.monotonic()
         if now - last_activity_time > timeout:
-            print("⚠️ Keep-alive timeout! Going to sleep...")
+            #print("⚠️ Keep-alive timeout! Going to sleep...")
             device.change_state("Sleep")
             break  # Exit loop to allow main() to sleep
         await asyncio.sleep(check_interval)
-        print(now)
 
 # Main entry
 async def main():
@@ -197,7 +205,7 @@ async def main():
     tasks = [
         asyncio.create_task(read_uart_loop()),
         asyncio.create_task(poll_ble_loop()),
-        asyncio.create_task(monitor_buttons(buttons, device)),
+        asyncio.create_task(monitor_buttons(buttons, device, uart)),
         asyncio.create_task(monitor_ble_connection(device)),
         asyncio.create_task(keep_alive_watchdog(device)),
     ]

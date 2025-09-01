@@ -31,7 +31,7 @@ class PerformCalibration:
         grav_buffer = []
         waiting_for_stable_sample = False  # Tracks if we're in measurement mode
 
-        while iteration < 56:
+        while iteration < 40:
             if device.current_state != "CALIBRATING":
                 print("❌ Calibration cancelled during phase 1.")
                 return
@@ -74,13 +74,13 @@ class PerformCalibration:
                     self.mag_array.append(mag_data)
                     self.grav_array.append(grav_data)
                     iteration += 1
-                    print(f"Calib Point: {iteration}/56")
+                    print(f"Calib Point: {iteration}/40")
                     sensor_mgr.set_buzzer(True)
                     await asyncio.sleep(0.2)  # Allow time for user to register feedback
                     disco_mode.turn_off()  # ✅ Turn off LED after success
                     waiting_for_stable_sample = False  # ✅ Reset for next button press
 
-            await asyncio.sleep(0.005)
+            await asyncio.sleep(0.002)
 
         await asyncio.sleep(0.1)
         sensor_mgr.set_buzzer(True)
@@ -150,7 +150,7 @@ class PerformCalibration:
 
 
         print("")
-        print("Laser alignment,     rotate 8 times on    target, repeat @ 90  degrees")
+        print("Laser alignment,     rotate 8 times on    target, repeat in 3 different directions")
         print("")
         print("")
         print("")
@@ -218,7 +218,7 @@ class PerformCalibration:
                         sensor_mgr.set_buzzer(True)
 
 
-            await asyncio.sleep(0.005)
+            await asyncio.sleep(0.002)
 
         await asyncio.sleep(0.1)
         sensor_mgr.set_buzzer(True)
