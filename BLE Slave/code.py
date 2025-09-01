@@ -185,7 +185,7 @@ async def monitor_buttons(buttons, device, uart):
 
 last_activity_time = 0
 
-async def keep_alive_watchdog(device, timeout=900):
+async def keep_alive_watchdog(device, timeout=1800):
     global last_activity_time
     check_interval = 1  # how often to check (in seconds)
 
