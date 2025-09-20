@@ -1,9 +1,7 @@
 import asyncio
-import json
-import gc
-from disco_manager import DiscoMode
-import microcontroller
 import os
+import json
+import microcontroller
 
 class PerformCalibration:
     def __init__(self, sensor_manager, button_manager, calib):
@@ -13,244 +11,158 @@ class PerformCalibration:
         self.mag_array = []
         self.grav_array = []
 
-    async def start_calibration(self, device, disco_mode):
-        print("Starting calibration.Press fire button    while rotating the   device in all        directions.")
+    async def collect_ellipsoid_data(self, device, disco_mode):
+        print("Starting ellipsoid   calibration. Take 56 readings in differentdirections.\n")
         print("")
-        print("")
-        sensor_mgr = self.sensor_manager
-        button_mgr = self.button_manager
-        calib = self.calib
-
-        sensor_mgr.set_laser(True)
         self.mag_array.clear()
         self.grav_array.clear()
+        sensor_mgr = self.sensor_manager
+        button_mgr = self.button_manager
 
-        # --- First phase ---
+        sensor_mgr.set_laser(True)
+
         iteration = 0
         mag_buffer = []
         grav_buffer = []
-        waiting_for_stable_sample = False  # Tracks if we're in measurement mode
+        waiting_for_stable_sample = False
 
-        while iteration < 40:
+        while iteration < 56:
             if device.current_state != "CALIBRATING":
                 print("❌ Calibration cancelled during phase 1.")
                 return
 
             button_mgr.update()
-
-            # Trigger new sampling cycle
             if button_mgr.was_pressed("Button 1") and not waiting_for_stable_sample:
                 waiting_for_stable_sample = True
-                disco_mode.set_red()  # Indicate measurement in progress
+                disco_mode.set_red()
 
-            # Always collect latest readings
             mag_data = sensor_mgr.get_mag()
             grav_data = sensor_mgr.get_grav()
 
-            # Maintain buffer of last 3 readings
             mag_buffer.append(mag_data)
             grav_buffer.append(grav_data)
+            if len(mag_buffer) > 3: mag_buffer.pop(0)
+            if len(grav_buffer) > 3: grav_buffer.pop(0)
 
-            if len(mag_buffer) > 3:
-                mag_buffer.pop(0)
-            if len(grav_buffer) > 3:
-                grav_buffer.pop(0)
-
-            # If waiting for stable reading, evaluate buffers
             if waiting_for_stable_sample and len(mag_buffer) == 3 and len(grav_buffer) == 3:
-                def is_consistent(buffer, threshold=0.15):
-                    base = buffer[0]
-                    for other in buffer[1:]:
-                        diffs = [abs(a - b) for a, b in zip(base, other)]
-                        if any(diff > threshold for diff in diffs):
-                            return False
-                    return True
-
-                mag_ok = is_consistent(mag_buffer)
-                grav_ok = is_consistent(grav_buffer)
-
-                if mag_ok and grav_ok:
+                if self._is_consistent(mag_buffer, 0.15) and self._is_consistent(grav_buffer, 0.15):
                     disco_mode.set_green()
                     self.mag_array.append(mag_data)
                     self.grav_array.append(grav_data)
                     iteration += 1
-                    print(f"Calib Point: {iteration}/40")
-                    sensor_mgr.set_buzzer(True)
-                    await asyncio.sleep(0.2)  # Allow time for user to register feedback
-                    disco_mode.turn_off()  # ✅ Turn off LED after success
-                    waiting_for_stable_sample = False  # ✅ Reset for next button press
-
-            await asyncio.sleep(0.002)
-
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        gc.collect() #free up a bit of RAM
-        mag_accuracy, grav_accuracy = calib.fit_ellipsoid(self.mag_array, self.grav_array)
-        calib.set_field_characteristics(self.mag_array, self.grav_array)
-        calib.set_expected_mean_dip(self.mag_array, self.grav_array)
-        print("")
-        print("")
-        print(f"  Mag: {mag_accuracy}")
-        print(f"  Grav: {grav_accuracy}")
-        print("")
-        print("✅ Hold 1+2 to SAVE")
-        print("❌ Hold 2 to DISCARD")
-        print("Lower = Better")
-        print("")
-        await asyncio.sleep(0.02)
-
-        selected = None
-        save_hold_time = 0.06  # seconds
-        hold_counter = 0.0
-
-        while selected is None:
-            button_mgr.update()
-
-            b1 = button_mgr.is_pressed("Button 1")
-            b2 = button_mgr.is_pressed("Button 2")
-
-            if b1 and b2:
-                hold_counter += 0.01
-                if hold_counter >= save_hold_time:
-                    selected = True
-                    await asyncio.sleep(0.5)
-            elif not b1 and b2:
-                hold_counter += 0.01
-                if hold_counter >= save_hold_time:
-                    selected = False
-                    await asyncio.sleep(0.5)
-            else:
-                hold_counter = 0.0  # reset if not holding combo
-
-            await asyncio.sleep(0.01)
-
-        calibration_dict = calib.as_dict() #load existing calibration to be overwritten
-
-        if selected:
-            try:
-                with open("/calibration_dict.json", "w") as f:
-                    json.dump(calibration_dict, f)
-                print("Calibration saved.")
-                print("")
-                print("")
-            except Exception as e:
-                print(f"❌ Failed to save calibration: {e}")
-                print("")
-                print("")
-            await asyncio.sleep(0.5)
-        else:
-            print("Calibration data     discarded.")
-            print("")
-            print("")
-            await asyncio.sleep(2)
-
-
-        print("")
-        print("Laser alignment,     rotate 8 times on    target, repeat in 3 different directions")
-        print("")
-        print("")
-        print("")
-        print("")
-
-        self.mag_array.clear()
-        self.grav_array.clear()
-
-        # --- Second phase ---
-        iteration = 0
-        mag_buffer = []
-        grav_buffer = []
-        waiting_for_stable_sample = False  # Tracks if we're in measurement mode
-
-        while iteration < 24:
-
-            button_mgr.update()
-
-            # Trigger new sampling cycle
-            if button_mgr.was_pressed("Button 1") and not waiting_for_stable_sample:
-                waiting_for_stable_sample = True
-                disco_mode.set_red()  # Indicate measurement in progress
-
-            # Always collect latest readings
-            mag_data = sensor_mgr.get_mag()
-            grav_data = sensor_mgr.get_grav()
-
-            # Maintain buffer of last 3 readings
-            mag_buffer.append(mag_data)
-            grav_buffer.append(grav_data)
-
-            if len(mag_buffer) > 3:
-                mag_buffer.pop(0)
-            if len(grav_buffer) > 3:
-                grav_buffer.pop(0)
-
-            # If waiting for a stable reading, check buffer
-            if waiting_for_stable_sample and len(mag_buffer) == 3 and len(grav_buffer) == 3:
-                def is_consistent(buffer, threshold=0.3):
-                    base = buffer[0]
-                    for other in buffer[1:]:
-                        diffs = [abs(a - b) for a, b in zip(base, other)]
-                        if any(diff > threshold for diff in diffs):
-                            return False
-                    return True
-
-                mag_ok = is_consistent(mag_buffer)
-                grav_ok = is_consistent(grav_buffer)
-
-                if mag_ok and grav_ok:
-                    disco_mode.set_green()
-                    self.mag_array.append(mag_data)
-                    self.grav_array.append(grav_data)
-                    iteration += 1
-                    print(f"Align Point {iteration}/24")
+                    print(f"Calib Point: {iteration}/56")
                     sensor_mgr.set_buzzer(True)
                     await asyncio.sleep(0.2)
                     disco_mode.turn_off()
-                    waiting_for_stable_sample = False  # Reset for next button press
-                    # Print every 8 readings
-                    if iteration % 8 == 0:
-                        print(f"Change direction...")
-                        sensor_mgr.set_buzzer(True)
-                        sensor_mgr.set_buzzer(True)
-                        sensor_mgr.set_buzzer(True)
-
+                    waiting_for_stable_sample = False
 
             await asyncio.sleep(0.002)
 
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        await asyncio.sleep(0.1)
-        sensor_mgr.set_buzzer(True)
-        # --------------------------------------------------
-        # Save data for reboot
-        # Build and save raw data to its own dict and file
+        await self._save_data("/ellipsoid_data.json", "ellipsoid")
+        self._write_flag("calculate_ellipsoid.txt")
+        print("Rebooting device")
+        await asyncio.sleep(1.5)
+        microcontroller.reset()
+
+
+    async def collect_alignment_data(self, disco_mode):
+        print("\nLaser alignment.     Rotate 8 times on    target. Repeat in 3  different directions.\n")
+        self.mag_array.clear()
+        self.grav_array.clear()
+
+        sensor_mgr = self.sensor_manager
+        button_mgr = self.button_manager
+
+        iteration = 0
+        mag_buffer = []
+        grav_buffer = []
+        waiting_for_stable_sample = False
+
+        while iteration < 24:
+            button_mgr.update()
+            if button_mgr.was_pressed("Button 1") and not waiting_for_stable_sample:
+                waiting_for_stable_sample = True
+                disco_mode.set_red()
+
+            mag_data = sensor_mgr.get_mag()
+            grav_data = sensor_mgr.get_grav()
+
+            mag_buffer.append(mag_data)
+            grav_buffer.append(grav_data)
+            if len(mag_buffer) > 3: mag_buffer.pop(0)
+            if len(grav_buffer) > 3: grav_buffer.pop(0)
+
+            if waiting_for_stable_sample and len(mag_buffer) == 3 and len(grav_buffer) == 3:
+                if self._is_consistent(mag_buffer, 0.3) and self._is_consistent(grav_buffer, 0.3):
+                    disco_mode.set_green()
+                    self.mag_array.append(mag_data)
+                    self.grav_array.append(grav_data)
+                    iteration += 1
+                    print(f"Align Point: {iteration}/24")
+                    sensor_mgr.set_buzzer(True)
+                    await asyncio.sleep(0.2)
+                    disco_mode.turn_off()
+                    waiting_for_stable_sample = False
+
+                    if iteration % 8 == 0:
+                        print("Change direction...")
+                        for _ in range(3):
+                            sensor_mgr.set_buzzer(True)
+                            await asyncio.sleep(0.1)
+
+            await asyncio.sleep(0.002)
+
+        for _ in range(3):
+            sensor_mgr.set_buzzer(True)
+            await asyncio.sleep(0.1)
+
+        await self._save_data("/alignment_data.json", "raw sensor")
+        self._write_flag("calculate_alignment.txt")
+        print("Rebooting device")
+        await asyncio.sleep(1.5)
+        microcontroller.reset()
+
+    async def wait_for_calibration_choice(self, device, disco_mode):
+        print("\nPress Button 1 for   Ellipsoid Calibration")
+        print("")
+        print("Press Button 2 for   Alignment Calibration\n")
+
+        while True:
+            self.button_manager.update()
+
+            if self.button_manager.was_pressed("Button 1"):
+                await self.collect_ellipsoid_data(device, disco_mode)
+                break  # Should not be reached due to reset
+            elif self.button_manager.was_pressed("Button 2"):
+                await self.collect_alignment_data(disco_mode)
+                break  # Should not be reached due to reset
+
+            await asyncio.sleep(0.01)
+
+    def _is_consistent(self, buffer, threshold):
+        base = buffer[0]
+        for other in buffer[1:]:
+            diffs = [abs(a - b) for a, b in zip(base, other)]
+            if any(diff > threshold for diff in diffs):
+                return False
+        return True
+
+    async def _save_data(self, filename, label):
         raw_data = {
             "mag": [list(m) for m in self.mag_array],
             "grav": [list(g) for g in self.grav_array]
         }
         try:
-            with open("/alignment_data.json", "w") as f:
+            with open(filename, "w") as f:
                 json.dump(raw_data, f)
-            print("Raw sensor data saved")
-            print("")
+            print("Processing data...")
         except Exception as e:
-            print(f"❌ Failed to save raw data: {e}")
-        # --------------------------------------------------
+            print(f"❌ Failed to save {label} data: {e}")
 
-        if "calibration_mode_activate.txt" not in os.listdir("/"):
+    def _write_flag(self, filename):
+        if filename not in os.listdir("/"):
             try:
-                with open("/calibration_mode_activate.txt", "w") as f:
+                with open(f"/{filename}", "w") as f:
                     f.write("1")
-                print("Processing...")
             except OSError as e:
-                print(f"Failed to write calibration_mode_activate.txt: {e}")
-
-        print("Rebooting device")
-        await asyncio.sleep(1.5)  # ⬅️ Give time to flush before reset
-        microcontroller.reset()
-
+                print(f"Failed to write {filename}: {e}")

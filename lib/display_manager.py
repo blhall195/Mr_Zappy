@@ -126,3 +126,28 @@ class DisplayManager:
 
         self.display.root_group = splash
         self.display.refresh()
+
+    def show_starting_calibration(self):
+        """Clears the screen and displays 'Starting Calibration'."""
+        # First, blank the screen
+        self.blank_screen()
+
+        # Create a new group for the message
+        splash = displayio.Group()
+
+        # Create label for "Starting Calibration"
+        text = "Starting\nCalibration"
+        calibration_label = label.Label(
+            self.font,
+            text=text,
+            scale=1,
+            x=0,  # Adjust horizontal position
+            y=10  # Roughly vertical center
+        )
+        splash.append(calibration_label)
+
+        # Set the display to show this new group
+        self.display.root_group = splash
+        self.display.refresh()
+
+
