@@ -9,6 +9,12 @@ if "calculate_ellipsoid.txt" in os.listdir("/"):
 if "calculate_alignment.txt" in os.listdir("/"):
     import calibration_calculate_alignment
 
+# Load toml file settings
+mag_tolerance = float(os.getenv("mag") or 10.0)
+grav_tolerance = float(os.getenv("grav") or 10.0)
+dip_tolerance = float(os.getenv("dip") or 10.0)
+auto_shutdown_delay = int(os.getenv("auto_shutdown_delay") or 1800)
+
 import asyncio
 import board
 import digitalio
@@ -183,7 +189,7 @@ async def sensor_read_display_update(readings, device):
 
                         # 🚨 Anomaly check
                         try:
-                            strictness = Strictness(mag=5.0, grav=5.0, dip=3.0)
+                            strictness = Strictness(mag=mag_tolerance, grav=grav_tolerance, dip=dip_tolerance)
                             calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(),strictness = strictness)
                         except MagneticAnomalyError:
                             print("❌ Magnetic anomaly detected")
@@ -334,7 +340,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
 
 
 last_activity_time = 0
-ACTIVITY_TIMEOUT = 1800  # seconds
+ACTIVITY_TIMEOUT = auto_shutdown_delay  # seconds
 
 def signal_activity():
     global last_activity_time
