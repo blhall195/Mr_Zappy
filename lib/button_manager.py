@@ -8,7 +8,7 @@ class ButtonManager:
         pin_map = {
             "Button 1": board.A3,
             "Button 2": board.A4,
-            "Button 3": board.D19,
+            "Button 3": board.A0,
             "Button 4": board.D25,
             "Fire Button": board.D4,
         }

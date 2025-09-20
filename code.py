@@ -1,10 +1,13 @@
 import os
 
-if "calibration_mode_activate.txt" in os.listdir("/"):
-    import calibration_alignment
+if "calibration_mode.txt" in os.listdir("/"):
+    import calibration_mode
 
-if "calibration_mode_ellipsoid.txt" in os.listdir("/"):
-    import calibration_ellipsoid
+if "calculate_ellipsoid.txt" in os.listdir("/"):
+    import calibration_calculate_ellipsoid
+
+if "calculate_alignment.txt" in os.listdir("/"):
+    import calibration_calculate_alignment
 
 import asyncio
 import board
@@ -221,10 +224,6 @@ async def watch_for_button_presses(device):
     while True:
         button_manager.update()
 
-        # Detect if both buttons are pressed simultaneously
-        button1_pressed = button_manager.is_pressed("Button 1")
-        button2_pressed = button_manager.is_pressed("Button 2")
-
         #Button 1 logic:
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
@@ -248,15 +247,16 @@ async def watch_for_button_presses(device):
                 disco_on = True
                 print("Disco mode ON (Button 2 pressed)")
 
-        #Button 2 hold for calibration mode logic
-        if button2_pressed:
+        #Button 3 logic:
+        if button_manager.is_pressed("Button 3"):
             signal_activity()
             if calibrate_button_start is None:
                 calibrate_button_start = time.monotonic()
             else:
                 held_time = time.monotonic() - calibrate_button_start
-                if held_time >= 3.0 and device.current_state == SystemState.IDLE:
-                    print("Entering calibration mode (Button 2 held 3s)")
+                if held_time >= 2.0 and device.current_state == SystemState.IDLE:
+                    print("Entering calibration mode (Button 3 held 2s)")
+                    display.show_starting_calibration()
                     device.current_state = SystemState.CALIBRATING
                     calibrate_button_start = None  # reset to prevent repeated triggers
         elif calibrate_button_start is not None:
@@ -278,7 +278,6 @@ async def check_battery_sensor(readings):
     while True:
         readings.battery_level = sensor_manager.get_bat()
         display.update_battery(readings.battery_level)
-        print(readings.battery_level)
         await asyncio.sleep(30)
 
 
@@ -317,21 +316,6 @@ def handle_command(cmd_byte, device, sensor_manager):
         print("✅ ACK received:", cmd_byte)
 
 
-
-def enter_calibration_mode():
-    print("Rebooting device")
-    if "calibration_mode_activate.txt" not in os.listdir("/"):
-        try:
-            with open("/calibration_mode_activate.txt", "w") as f:
-                f.write("1")
-            print("Processing...")
-        except OSError as e:
-            print(f"Failed to write calibration_mode_activate.txt: {e}")
-    print("Rebooting device")
-    await asyncio.sleep(1.5)  # ⬅️ Give time to flush before reset
-
-
-
 async def monitor_ble_uart(ble_manager, device, sensor_manager):
     while True:
         msg = ble_manager.read_message()
@@ -339,16 +323,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
             print(f"📥 UART message from slave: {msg}")
 
             if msg == "Shutting_Down":
-                display = DisplayManager()
-                print("")
-                print("")
-                print("Shutdown in...")
-                await asyncio.sleep(1)
-                print("   3")
-                await asyncio.sleep(1)
-                print("   2")
-                await asyncio.sleep(1)
-                print("   1")
+                #set pin that pulls switch IC low
                 await asyncio.sleep(1)
 
             elif msg in COMMANDS:
@@ -359,7 +334,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
 
 
 last_activity_time = 0
-ACTIVITY_TIMEOUT = 30  # seconds
+ACTIVITY_TIMEOUT = 1800  # seconds
 
 def signal_activity():
     global last_activity_time
@@ -369,12 +344,14 @@ async def send_keep_alive_periodically(ble_manager):
     global last_activity_time
     while True:
         now = time.monotonic()
-        if now - last_activity_time < ACTIVITY_TIMEOUT:
+        if now - last_activity_time > ACTIVITY_TIMEOUT:
             try:
-                ble_manager.send_keep_alive()
+                #insert command that pulls the switch in pin low
+                print("inactivity timeout, shutting down device")
+                print(now,last_activity_time, ACTIVITY_TIMEOUT)
             except Exception as e:
-                print(f"Error sending keep-alive: {e}")
-        await asyncio.sleep(2)  # send every 5 seconds if active
+                print(f"Error shutting down device: {e}")
+        await asyncio.sleep(5)  #check every 5 seconds
 
 
 async def main():
@@ -393,43 +370,20 @@ async def main():
         while device.current_state != SystemState.CALIBRATING:
             await asyncio.sleep(0.1)
 
-        # Calibration triggered: stop background tasks
-        disco_mode.turn_off()
-        sensor_reading.cancel()
-        watch_for_buttons.cancel()
-        check_battery.cancel()
-        monitor_ble.cancel()
-
-        try:
-            await asyncio.gather(
-                sensor_reading,
-                watch_for_buttons,
-                check_battery,
-                monitor_ble,
-            )
-        except asyncio.CancelledError:
-            pass  # Expected on cancel
-
-        # Re-initialize display if needed
-        display = DisplayManager()
-        await asyncio.sleep(0.5)
         print("Entering Calibration Mode...")
         print("")
         print("")
-        print("")
 
-        if "calibration_mode_ellipsoid.txt" not in os.listdir("/"):
+        if "calibration_mode.txt" not in os.listdir("/"):
             try:
-                with open("/calibration_mode_ellipsoid.txt", "w") as f:
+                with open("/calibration_mode.txt", "w") as f:
                     f.write("1")
+                microcontroller.reset()
             except OSError as e:
-                print(f"Failed to write calibration_mode_ellipsoid.txt: {e}")
+                print(f"Failed to write calibration_mode.txt: {e}")
+                microcontroller.reset()
+
 
         microcontroller.reset()
-
-        await asyncio.sleep(3)  # ⬅️ Give time to flush before reset
-
-
-
 
 asyncio.run(main())
