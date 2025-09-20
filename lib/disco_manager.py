@@ -10,7 +10,14 @@ class DiscoMode:
         self.sensor_manager = sensor_manager
         self.pixel_pin = pixel_pin
         self.num_pixels = num_pixels
-        self.brightness = max(0.0, min(1.0, brightness))
+
+        # Brightness handling
+        self.base_brightness = 0.3
+        self.wild_brightness = 1.0
+        self.brightness = self.base_brightness
+        self._last_shake_time = 0
+        self._shake_timeout = 5  # seconds to return to dim after shake
+
         self.pixels = neopixel.NeoPixel(
             self.pixel_pin,
             self.num_pixels,
@@ -58,8 +65,12 @@ class DiscoMode:
         """Start the disco (rainbow) effect."""
         if not self.is_active:
             self.is_active = True
-            print("Disco Mode ON")
+            self.brightness = self.base_brightness  # Reset to dim every time it's started
+            self.wild_latched = False               # Reset latch
+            self._last_shake_time = 0               # Clear shake timestamp
+            print("Disco Mode ON (starting dim)")
             self.task = self.loop.create_task(self._run_disco_effect())
+
 
     async def _run_disco_effect(self):
         """Run the rainbow effect with latched wild mode based on gravity."""
@@ -68,24 +79,32 @@ class DiscoMode:
         color_step_base = 20
 
         j = 0
-        self.wild_latched = False  # latch flag
+        self.wild_latched = False
 
         while self.is_active:
-            # Continuously sample gravity
             grav = self.sensor_manager.get_grav()
             gx, gy, gz = grav if grav else (0, 0, 0)
 
-            # Trigger wild mode once if any axis exceeds ~1.1g
-            if not self.wild_latched and (abs(gx) > 11 or abs(gy) > 11 or abs(gz) > 11):
-                self.wild_latched = True
-                print("🔥 Wild mode latched ON!")
+            now = time.monotonic()
 
-            is_wild = self.wild_latched
+            # Detect shake
+            if abs(gx) > 11 or abs(gy) > 11 or abs(gz) > 11:
+                self.wild_latched = True
+                self._last_shake_time = now
+                self.brightness = self.wild_brightness
+                print("🔥 Wild mode latched ON! Brightness increased.")
+
+            # Return to dim after timeout
+            if self.wild_latched and now - self._last_shake_time > self._shake_timeout:
+                self.brightness = self.base_brightness
+                print("🌙 Calm mode. Brightness reduced.")
+
+            is_wild = self.brightness == self.wild_brightness
             sleep_time = wild_sleep if is_wild else base_sleep
 
             # Choose color
             if is_wild:
-                hue = random.random()  # random hue between 0.0–1.0
+                hue = random.random()
             else:
                 hue = (j % 360) / 360.0
                 j += color_step_base
@@ -96,14 +115,12 @@ class DiscoMode:
             self.pixels.fill(color)
             self.pixels.show()
 
-            #print(f"Gravity: ({gx:.2f}, {gy:.2f}, {gz:.2f}) | Wild Mode: {is_wild}")
-
             await asyncio.sleep(sleep_time)
 
-        # Turn off LED when done
+        # Cleanup
         self.pixels.fill((0, 0, 0))
         self.pixels.show()
-        self.wild_latched = False  # Reset for next run
+        self.wild_latched = False
 
     def hsv_to_rgb(self, h, s, v):
         """Convert HSV to RGB."""

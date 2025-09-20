@@ -1,19 +1,7 @@
 import os
 
-if "calibration_mode.txt" in os.listdir("/"):
-    import calibration_mode
-
-if "calculate_ellipsoid.txt" in os.listdir("/"):
-    import calibration_calculate_ellipsoid
-
-if "calculate_alignment.txt" in os.listdir("/"):
-    import calibration_calculate_alignment
-
-# Load toml file settings
-mag_tolerance = float(os.getenv("mag") or 10.0)
-grav_tolerance = float(os.getenv("grav") or 10.0)
-dip_tolerance = float(os.getenv("dip") or 10.0)
-auto_shutdown_delay = int(os.getenv("auto_shutdown_delay") or 1800)
+if "calibration_mode_activate.txt" in os.listdir("/"):
+    import calibration_alignment
 
 import asyncio
 import board
@@ -29,7 +17,6 @@ from ble_manager import BleManager
 from disco_manager import DiscoMode
 import json
 from calibrate_roll import align_sensor_roll
-import microcontroller
 
 try:
     from calibrate_roll import align_sensor_roll
@@ -63,6 +50,7 @@ class SystemState():
     TAKING_MEASURMENT = "TAKING_MEASURMENT"
     CALIBRATING = "CALIBRATING"
     DISPLAYING = "DISPLAYING"
+    SHUTTING_DOWN = "SHUTTING_DOWN"
 
 system_state = SystemState()
 
@@ -189,7 +177,7 @@ async def sensor_read_display_update(readings, device):
 
                         # 🚨 Anomaly check
                         try:
-                            strictness = Strictness(mag=mag_tolerance, grav=grav_tolerance, dip=dip_tolerance)
+                            strictness = Strictness(mag=5.0, grav=5.0, dip=3.0)
                             calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(),strictness = strictness)
                         except MagneticAnomalyError:
                             print("❌ Magnetic anomaly detected")
@@ -230,6 +218,10 @@ async def watch_for_button_presses(device):
     while True:
         button_manager.update()
 
+        # Detect if both buttons are pressed simultaneously
+        button1_pressed = button_manager.is_pressed("Button 1")
+        button2_pressed = button_manager.is_pressed("Button 2")
+
         #Button 1 logic:
         if button_manager.was_pressed("Button 1"):
             print("Fire Button pressed!")
@@ -253,16 +245,15 @@ async def watch_for_button_presses(device):
                 disco_on = True
                 print("Disco mode ON (Button 2 pressed)")
 
-        #Button 3 logic:
-        if button_manager.is_pressed("Button 3"):
+        #Button 2 hold for calibration mode logic
+        if button2_pressed:
             signal_activity()
             if calibrate_button_start is None:
                 calibrate_button_start = time.monotonic()
             else:
                 held_time = time.monotonic() - calibrate_button_start
-                if held_time >= 2.0 and device.current_state == SystemState.IDLE:
-                    print("Entering calibration mode (Button 3 held 2s)")
-                    display.show_starting_calibration()
+                if held_time >= 3.0 and device.current_state == SystemState.IDLE:
+                    print("Entering calibration mode (Button 2 held 3s)")
                     device.current_state = SystemState.CALIBRATING
                     calibrate_button_start = None  # reset to prevent repeated triggers
         elif calibrate_button_start is not None:
@@ -284,6 +275,7 @@ async def check_battery_sensor(readings):
     while True:
         readings.battery_level = sensor_manager.get_bat()
         display.update_battery(readings.battery_level)
+        print(readings.battery_level)
         await asyncio.sleep(30)
 
 
@@ -321,7 +313,6 @@ def handle_command(cmd_byte, device, sensor_manager):
     elif cmd_byte in (0x55, 0x56):  # ACKs
         print("✅ ACK received:", cmd_byte)
 
-
 async def monitor_ble_uart(ble_manager, device, sensor_manager):
     while True:
         msg = ble_manager.read_message()
@@ -329,8 +320,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
             print(f"📥 UART message from slave: {msg}")
 
             if msg == "Shutting_Down":
-                #set pin that pulls switch IC low
-                await asyncio.sleep(1)
+                device.current_state = "SHUTTING_DOWN"
 
             elif msg in COMMANDS:
                 cmd_byte = COMMANDS[msg]
@@ -340,7 +330,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
 
 
 last_activity_time = 0
-ACTIVITY_TIMEOUT = auto_shutdown_delay  # seconds
+ACTIVITY_TIMEOUT = 30  # seconds
 
 def signal_activity():
     global last_activity_time
@@ -350,18 +340,15 @@ async def send_keep_alive_periodically(ble_manager):
     global last_activity_time
     while True:
         now = time.monotonic()
-        if now - last_activity_time > ACTIVITY_TIMEOUT:
+        if now - last_activity_time < ACTIVITY_TIMEOUT:
             try:
-                #insert command that pulls the switch in pin low
-                print("inactivity timeout, shutting down device")
-                print(now,last_activity_time, ACTIVITY_TIMEOUT)
+                ble_manager.send_keep_alive()
             except Exception as e:
-                print(f"Error shutting down device: {e}")
-        await asyncio.sleep(5)  #check every 5 seconds
+                print(f"Error sending keep-alive: {e}")
+        await asyncio.sleep(2)  # send every 5 seconds if active
 
 
 async def main():
-
     # Create and start background tasks once
     calibration = PerformCalibration(sensor_manager, button_manager, calib)
     sensor_reading = asyncio.create_task(sensor_read_display_update(readings, device))
@@ -371,25 +358,49 @@ async def main():
     monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
     keep_alive_task = asyncio.create_task(send_keep_alive_periodically(ble))
 
-    while True:
-        # Wait until calibration is triggered
-        while device.current_state != SystemState.CALIBRATING:
+    try:
+        # Wait until shutdown is triggered
+        while device.current_state != SystemState.SHUTTING_DOWN:
             await asyncio.sleep(0.1)
 
-        print("Entering Calibration Mode...")
+        # Shutdown triggered: stop background tasks
+        disco_mode.turn_off()
+
+        # Cancel background tasks
+        sensor_reading.cancel()
+        watch_for_buttons.cancel()
+        check_battery.cancel()
+        monitor_ble.cancel()
+        monitor_ble_uart_task.cancel()
+        keep_alive_task.cancel()
+
+        # Wait for tasks to be cancelled cleanly
+        await asyncio.gather(
+            sensor_reading,
+            watch_for_buttons,
+            check_battery,
+            monitor_ble,
+            monitor_ble_uart_task,
+            keep_alive_task,
+            return_exceptions=True  # Prevents cancellation exceptions from breaking gather
+        )
+
+        display = DisplayManager()
         print("")
         print("")
+        print("Shutdown in...")
+        await asyncio.sleep(1)
+        print("   3")
+        await asyncio.sleep(1)
+        print("   2")
+        await asyncio.sleep(1)
+        print("   1")
+        await asyncio.sleep(3)
 
-        if "calibration_mode.txt" not in os.listdir("/"):
-            try:
-                with open("/calibration_mode.txt", "w") as f:
-                    f.write("1")
-                microcontroller.reset()
-            except OSError as e:
-                print(f"Failed to write calibration_mode.txt: {e}")
-                microcontroller.reset()
+    except Exception as e:
+        print(f"Exception during shutdown: {e}")
 
 
-        microcontroller.reset()
 
+# Run the main function
 asyncio.run(main())
