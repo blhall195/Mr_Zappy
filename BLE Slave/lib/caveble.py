@@ -128,7 +128,7 @@ class SurveyProtocolService(Service):
             if cmd == expected_ack:
                 print("ACK received")
                 self.waiting_for_ack = False
-                return None
+                return cmd
             elif cmd == unexpected_ack:
                 print("Wrong ack received: expecting ", expected_ack)
                 return None

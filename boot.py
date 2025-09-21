@@ -1,5 +1,5 @@
-#delete the 3 apostrophies above if you want to disable the usb protection code and allow
-#the microcontroller to mount via usb when plugged into a PC, you may want to emable this to prevent disc corruption
+#delete the 3 apostrophies above if you want to enable the boot out code to allow
+#the microcontroller to write to the devices memory when not plugged into a PC
 
 import board
 import digitalio
