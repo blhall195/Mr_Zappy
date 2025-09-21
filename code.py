@@ -113,7 +113,7 @@ async def sensor_read_display_update(readings, device):
     def safe_number(val):
         return isinstance(val, (int, float)) and math.isfinite(val)
 
-    def is_consistent(buffer, threshold=0.5):
+    def is_consistent(buffer, threshold = leg_tolerance):
         base = buffer[0]
         for other in buffer[1:]:
             if abs(base - other) > threshold:
