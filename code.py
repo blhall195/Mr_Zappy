@@ -14,6 +14,7 @@ mag_tolerance = float(os.getenv("mag") or 10.0)
 grav_tolerance = float(os.getenv("grav") or 10.0)
 dip_tolerance = float(os.getenv("dip") or 10.0)
 auto_shutdown_delay = int(os.getenv("auto_shutdown_delay") or 1800)
+leg_tolerance = float(os.getenv("leg_tolerance") or 1.7)
 
 import asyncio
 import board
@@ -125,6 +126,8 @@ async def sensor_read_display_update(readings, device):
     laser_enabled = False
     prev_azimuth = None
     current_disco_color = None
+    stable_azimuth_buffer = []
+    stable_inclination_buffer = []
 
     while True:
         if device.current_state == SystemState.IDLE:
@@ -172,48 +175,108 @@ async def sensor_read_display_update(readings, device):
 
                 if len(azimuth_buffer) == 3:
                     if is_consistent(azimuth_buffer) and is_consistent(inclination_buffer):
-                        disco_mode.set_green()
-                        sensor_manager.set_buzzer(True)
 
-                        #Get reading if readings are stable
+                        # ✅ Compute average azimuth & inclination
+                        readings.azimuth = sum(azimuth_buffer) / len(azimuth_buffer)
+                        readings.inclination = sum(inclination_buffer) / len(inclination_buffer)
+
                         try:
+                            # Read distance
                             distance_cm = sensor_manager.get_distance()
                             if distance_cm is None or not isinstance(distance_cm, (int, float)):
                                 raise ValueError("Invalid distance reading")
                             readings.distance = distance_cm / 100
-                            ble.send_message(readings.azimuth, readings.inclination, readings.distance)
-                        except Exception as e:
-                            print(f"❌ Distance read failed: {e}")
-                            readings.distance = "ERR"
-                        display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
 
-                        # 🚨 Anomaly check
-                        try:
+                            # Perform anomaly check BEFORE sending
                             strictness = Strictness(mag=mag_tolerance, grav=grav_tolerance, dip=dip_tolerance)
-                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(),strictness = strictness)
+                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(), strictness=strictness)
+
                         except MagneticAnomalyError:
                             print("❌ Magnetic anomaly detected")
                             readings.distance = "Mag ERR"
-                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
                             disco_mode.set_red()
-                            device.measurement_taken = True
-                        except GravityAnomalyError:
-                            print("❌ Gravity anomaly detected – likely motion")
-                            readings.distance = "Grav ERR"
-                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+                            await asyncio.sleep(0.1)
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
                             disco_mode.set_red()
-                            device.measurement_taken = True
-                        except DipAnomalyError:
-                            print("❌ Dip angle anomaly detected")
-                            readings.distance = "Dip ERR"
-                            display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+                            await asyncio.sleep(0.1)
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
                             disco_mode.set_red()
                             device.measurement_taken = True
 
+                        except GravityAnomalyError:
+                            print("❌ Gravity anomaly detected – likely motion")
+                            readings.distance = "Grav ERR"
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
+                            disco_mode.set_red()
+                            await asyncio.sleep(0.1)
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
+                            disco_mode.set_red()
+                            await asyncio.sleep(0.1)
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
+                            disco_mode.set_red()
+                            device.measurement_taken = True
+
+                        except DipAnomalyError:
+                            print("❌ Dip angle anomaly detected")
+                            readings.distance = "Dip ERR"
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
+                            disco_mode.set_red()
+                            await asyncio.sleep(0.1)
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
+                            disco_mode.set_red()
+                            await asyncio.sleep(0.1)
+                            disco_mode.turn_off()
+                            await asyncio.sleep(0.1)
+                            disco_mode.set_red()
+                            device.measurement_taken = True
+
+                        except Exception as e:
+                            print(f"❌ Distance read failed or other error: {e}")
+                            readings.distance = "ERR"
+
+                        else:
+                            # No anomaly detected: send BLE message
+                            disco_mode.set_green()
+                            sensor_manager.set_buzzer(True)
+                            ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+
+                            # Append stable reading to stable buffers
+                            stable_azimuth_buffer.append(readings.azimuth)
+                            stable_inclination_buffer.append(readings.inclination)
+
+                            # Keep only last 3 stable readings
+                            if len(stable_azimuth_buffer) > 3:
+                                stable_azimuth_buffer.pop(0)
+                                stable_inclination_buffer.pop(0)
+
+                            # Check if last 3 stable readings are consistent
+                            if len(stable_azimuth_buffer) == 3:
+                                if is_consistent(stable_azimuth_buffer) and is_consistent(stable_inclination_buffer):
+                                    for _ in range(3):
+                                        sensor_manager.set_buzzer(True)
+                                        disco_mode.set_white()
+                                        await asyncio.sleep(0.1)
+                                        disco_mode.turn_off()
+
+                                    stable_azimuth_buffer.clear()
+                                    stable_inclination_buffer.clear()
+
                         device.measurement_taken = True
+
+                        # Update display regardless of success or failure
+                        display.update_sensor_readings(readings.distance, readings.azimuth, readings.inclination)
+
                         await asyncio.sleep(0.02)
                         disco_mode.turn_off()
-                        print("📍 Measurement recorded.")
                         current_disco_color = None
                         device.current_state = SystemState.DISPLAYING
 
@@ -323,19 +386,23 @@ def handle_command(cmd_byte, device, sensor_manager):
 
 
 async def monitor_ble_uart(ble_manager, device, sensor_manager):
+    global ble_ack_received
     while True:
         msg = ble_manager.read_message()
         if msg:
             print(f"📥 UART message from slave: {msg}")
-
-            if msg == "Shutting_Down":
-                #set pin that pulls switch IC low
-                await asyncio.sleep(1)
-
+            if msg == "85" or msg == "86":
+                disco_mode.set_blue()
+                await asyncio.sleep(0.2)
+                disco_mode.turn_off()
+                await asyncio.sleep(0.1)
+                disco_mode.set_blue()
+                await asyncio.sleep(0.2)
+                disco_mode.turn_off()
+                ble_ack_received = False
             elif msg in COMMANDS:
                 cmd_byte = COMMANDS[msg]
                 handle_command(cmd_byte, device, sensor_manager)
-
         await asyncio.sleep(0.01)
 
 

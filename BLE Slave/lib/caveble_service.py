@@ -8,14 +8,14 @@ class BLEService:
         self.ble = BLERadio()
         self.ble.name = name
         print(f"BLE Name: {self.ble.name}")
-        
+
         self.survey_protocol = protocol if protocol else caveble.SurveyProtocolService()
         self.advertisement = ProvideServicesAdvertisement(self.survey_protocol)
-        
+
     def start_advertising(self):
         print("Starting BLE advertising...")
         self.ble.start_advertising(self.advertisement)
-        
+
     def stop_advertising(self):
         print("Stopping BLE advertising...")
         self.ble.stop_advertising()
@@ -24,14 +24,14 @@ class BLEService:
         print("Waiting for BLE connection...")
         while not self.ble.connected:
             await asyncio.sleep(0.2)  # Keep checking for a connection
-            
+
         print("BLE Connected!")
 
     async def wait_for_disconnection(self):
         print("Waiting for BLE disconnection...")
         while self.ble.connected:
             await asyncio.sleep(0.2)  # Keep checking for disconnection
-            
+
         print("BLE Disconnected!")
 
     async def manage_connection(self):
@@ -56,7 +56,7 @@ class BLEService:
 
             await asyncio.sleep(1)  # Restart BLE operation in case of error
 
-        
+
     def send_survey_data(self, compass, clino, distance):
         """
         This method sends the survey data using the protocol.

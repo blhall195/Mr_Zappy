@@ -47,8 +47,12 @@ class PerformCalibration:
             if waiting_for_stable_sample and len(mag_buffer) == 3 and len(grav_buffer) == 3:
                 if self._is_consistent(mag_buffer, 0.15) and self._is_consistent(grav_buffer, 0.15):
                     disco_mode.set_green()
-                    self.mag_array.append(mag_data)
-                    self.grav_array.append(grav_data)
+
+                    avg_mag = tuple(sum(axis_vals) / 3 for axis_vals in zip(*mag_buffer))
+                    avg_grav = tuple(sum(axis_vals) / 3 for axis_vals in zip(*grav_buffer))
+
+                    self.mag_array.append(avg_mag)
+                    self.grav_array.append(avg_grav)
                     iteration += 1
                     print(f"Calib Point: {iteration}/56")
                     sensor_mgr.set_buzzer(True)
@@ -95,8 +99,12 @@ class PerformCalibration:
             if waiting_for_stable_sample and len(mag_buffer) == 3 and len(grav_buffer) == 3:
                 if self._is_consistent(mag_buffer, 0.3) and self._is_consistent(grav_buffer, 0.3):
                     disco_mode.set_green()
-                    self.mag_array.append(mag_data)
-                    self.grav_array.append(grav_data)
+
+                    avg_mag = tuple(sum(axis_vals) / 3 for axis_vals in zip(*mag_buffer))
+                    avg_grav = tuple(sum(axis_vals) / 3 for axis_vals in zip(*grav_buffer))
+
+                    self.mag_array.append(avg_mag)
+                    self.grav_array.append(avg_grav)
                     iteration += 1
                     print(f"Align Point: {iteration}/24")
                     sensor_mgr.set_buzzer(True)

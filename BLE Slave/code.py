@@ -68,7 +68,7 @@ async def read_uart_loop():
                         continue
 
                     parsed = parse_uart_line(line)
-                    if parsed and ble.connected:
+                    if parsed:
                         compass, clino, distance = parsed
                         print(f"Sending over BLE: {parsed}")
                         survey_protocol.send_data(compass, clino, distance)
@@ -79,11 +79,11 @@ async def read_uart_loop():
         else:
             await asyncio.sleep(0.01)
 
-# BLE → UART: Forward messages received from BLE to master over UART
-async def poll_ble_loop():
+
+async def monitor_ble_messages():
     while True:
         message = survey_protocol.poll()
-        if message:
+        if message is not None:
             print(f"Received from BLE: {message}")
             try:
                 if isinstance(message, str):
@@ -95,6 +95,31 @@ async def poll_ble_loop():
             except Exception as e:
                 print(f"UART write error: {e}")
         await asyncio.sleep(0.01)
+
+
+async def poll_ble_loop():
+    while True:
+        message = survey_protocol.poll()
+        if message is not None:
+            print(f"Received from BLE: {message}")
+            try:
+                if message == survey_protocol.ACK0:
+                    uart.write(b"ACK_RECEIVED\n")
+                elif message == survey_protocol.ACK1:
+                    uart.write(b"ACK_RECEIVED\n")
+                else:
+                    # Forward other commands as strings
+                    if isinstance(message, str):
+                        uart.write((message + "\n").encode("utf-8"))
+                    elif isinstance(message, bytes):
+                        uart.write(message + b"\n")
+                    else:
+                        uart.write((str(message) + "\n").encode("utf-8"))
+            except Exception as e:
+                print(f"UART write error: {e}")
+        await asyncio.sleep(0.01)
+
+
 
 # BLE connection monitor: updates the ble_connected pin
 async def monitor_ble_connection():
@@ -108,6 +133,8 @@ async def monitor_ble_connection():
             else:
                 print("🔴 BLE Disconnected")
                 ble_connected.value = False
+                if not ble.connected and not ble.advertising:
+                    ble.start_advertising(advertisement)
             last_state = current_state
         await asyncio.sleep(0.1)
 
@@ -115,11 +142,12 @@ async def monitor_ble_connection():
 async def main():
     tasks = [
         asyncio.create_task(read_uart_loop()),
-        asyncio.create_task(poll_ble_loop()),
+        asyncio.create_task(monitor_ble_messages()),
         asyncio.create_task(monitor_ble_connection()),
     ]
     while True:
         await asyncio.sleep(0.1)
+
 
 # Run everything
 asyncio.run(main())

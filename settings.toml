@@ -5,5 +5,8 @@ mag = "10.0" #degrees
 grav = "10.0" #degrees
 dip = "10.0" #degrees
 
+#Leg tolerance
+leg_tolerance = "2.5"
+
 #auto shutdown delay
 auto_shutdown_delay = 1800 #seconds

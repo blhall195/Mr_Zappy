@@ -36,16 +36,28 @@ class DiscoMode:
             int(b * self.brightness)
         )
 
+    def set_red(self):
+        """Set LED to red."""
+        self._stop_disco()
+        self.pixels.fill(self._apply_brightness(255, 0, 0))
+        self.pixels.show()
+
     def set_green(self):
         """Set LED to green."""
         self._stop_disco()
         self.pixels.fill(self._apply_brightness(0, 255, 0))
         self.pixels.show()
 
-    def set_red(self):
+    def set_blue(self):
         """Set LED to red."""
         self._stop_disco()
-        self.pixels.fill(self._apply_brightness(255, 0, 0))
+        self.pixels.fill(self._apply_brightness(0, 0, 225))
+        self.pixels.show()
+
+    def set_white(self):
+        """Set LED to red."""
+        self._stop_disco()
+        self.pixels.fill(self._apply_brightness(225, 225, 225))
         self.pixels.show()
 
     def turn_off(self):
@@ -71,6 +83,20 @@ class DiscoMode:
             print("Disco Mode ON (starting dim)")
             self.task = self.loop.create_task(self._run_disco_effect())
 
+    def hsv_to_rgb(self, h, s, v):
+        """Convert HSV to RGB."""
+        i = int(h * 6)
+        f = h * 6 - i
+        p = v * (1 - s)
+        q = v * (1 - f * s)
+        t = v * (1 - (1 - f) * s)
+        i = i % 6
+        if i == 0: return int(v * 255), int(t * 255), int(p * 255)
+        if i == 1: return int(q * 255), int(v * 255), int(p * 255)
+        if i == 2: return int(p * 255), int(v * 255), int(t * 255)
+        if i == 3: return int(p * 255), int(q * 255), int(v * 255)
+        if i == 4: return int(t * 255), int(p * 255), int(v * 255)
+        if i == 5: return int(v * 255), int(p * 255), int(q * 255)
 
     async def _run_disco_effect(self):
         """Run the rainbow effect with latched wild mode based on gravity."""
@@ -122,17 +148,3 @@ class DiscoMode:
         self.pixels.show()
         self.wild_latched = False
 
-    def hsv_to_rgb(self, h, s, v):
-        """Convert HSV to RGB."""
-        i = int(h * 6)
-        f = h * 6 - i
-        p = v * (1 - s)
-        q = v * (1 - f * s)
-        t = v * (1 - (1 - f) * s)
-        i = i % 6
-        if i == 0: return int(v * 255), int(t * 255), int(p * 255)
-        if i == 1: return int(q * 255), int(v * 255), int(p * 255)
-        if i == 2: return int(p * 255), int(v * 255), int(t * 255)
-        if i == 3: return int(p * 255), int(q * 255), int(v * 255)
-        if i == 4: return int(t * 255), int(p * 255), int(v * 255)
-        if i == 5: return int(v * 255), int(p * 255), int(q * 255)
