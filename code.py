@@ -149,6 +149,7 @@ async def sensor_read_display_update(readings, device):
     display.update_BT_number(ble_disconnection_counter)
 
     while True:
+
         if device.current_state == SystemState.IDLE:
             if laser_enabled:
                 sensor_manager.set_laser(True)
@@ -309,9 +310,9 @@ async def sensor_read_display_update(readings, device):
                         device.current_state = SystemState.DISPLAYING
 
         if device.current_state == SystemState.IDLE:
-            await asyncio.sleep(0.5)  # faster loop for active measuring
+            await asyncio.sleep(1)  # Slower loop for Idle
         elif device.current_state == SystemState.DISPLAYING:
-            await asyncio.sleep(0.5)  # faster loop for active measuring
+            await asyncio.sleep(0.01)  # faster loop for active measuring
 
 
 async def watch_for_button_presses(device):
@@ -359,7 +360,7 @@ async def watch_for_button_presses(device):
         elif calibrate_button_start is not None:
             calibrate_button_start = None  # Reset when button released
 
-        await asyncio.sleep(0.001)
+        await asyncio.sleep(0.0005)
 
 def update_readings(readings,):
     try:
@@ -442,7 +443,7 @@ def signal_activity():
     global last_activity_time
     last_activity_time = time.monotonic()
 
-async def send_keep_alive_periodically(ble_manager):
+async def auto_switch_off_timount():
     global last_activity_time
     while True:
         now = time.monotonic()
@@ -465,7 +466,7 @@ async def main():
     check_battery = asyncio.create_task(check_battery_sensor(readings))
     monitor_ble = asyncio.create_task(monitor_ble_pin(device))
     monitor_ble_uart_task = asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
-    keep_alive_task = asyncio.create_task(send_keep_alive_periodically(ble))
+    auto_shutdown_task = asyncio.create_task(auto_switch_off_timount())
 
     while True:
         # Wait until calibration is triggered
