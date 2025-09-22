@@ -14,7 +14,10 @@ mag_tolerance = float(os.getenv("mag") or 10.0)
 grav_tolerance = float(os.getenv("grav") or 10.0)
 dip_tolerance = float(os.getenv("dip") or 10.0)
 auto_shutdown_delay = int(os.getenv("auto_shutdown_delay") or 1800)
-leg_tolerance = float(os.getenv("leg_tolerance") or 1.7)
+stability_tolerance = float(os.getenv("stability_tolerance") or 0.5) #sets the noise tolerance before a reading is registered, there must be 3 consistent readings within this range for it to accept the reading
+leg_angle_tolerance = float(os.getenv("leg_angle_tolerance") or 1.7) #degrees - same as default setting on sexytopo
+leg_distance_tolerance = float(os.getenv("leg_distance_tolerance") or 0.05) #m - same as default setting on sexytopo
+laser_distance_offset = float(os.getenv("laser_distance_offset") or 0.05) # in m accounts for length of device
 
 import asyncio
 import board
@@ -105,7 +108,6 @@ ble_status_pin = digitalio.DigitalInOut(board.D11)
 ble_status_pin.direction = digitalio.Direction.INPUT
 ble_status_pin.pull = digitalio.Pull.DOWN
 
-
 async def sensor_read_display_update(readings, device):
     prev_azimuth = None
     laser_enabled = False  # Track laser state manually
@@ -113,7 +115,21 @@ async def sensor_read_display_update(readings, device):
     def safe_number(val):
         return isinstance(val, (int, float)) and math.isfinite(val)
 
-    def is_consistent(buffer, threshold = leg_tolerance):
+    def is_consistent(buffer, threshold = stability_tolerance):
+        base = buffer[0]
+        for other in buffer[1:]:
+            if abs(base - other) > threshold:
+                return False
+        return True
+
+    def is_consistent_leg_angle(buffer, threshold = leg_angle_tolerance):
+        base = buffer[0]
+        for other in buffer[1:]:
+            if abs(base - other) > threshold:
+                return False
+        return True
+
+    def is_consistent_leg_distance(buffer, threshold = leg_distance_tolerance):
         base = buffer[0]
         for other in buffer[1:]:
             if abs(base - other) > threshold:
@@ -128,6 +144,9 @@ async def sensor_read_display_update(readings, device):
     current_disco_color = None
     stable_azimuth_buffer = []
     stable_inclination_buffer = []
+    stable_distance_buffer = []
+    ble_disconnection_counter = 0 #counts the number of pending readings and reports them on the display
+    display.update_BT_number(ble_disconnection_counter)
 
     while True:
         if device.current_state == SystemState.IDLE:
@@ -185,7 +204,7 @@ async def sensor_read_display_update(readings, device):
                             distance_cm = sensor_manager.get_distance()
                             if distance_cm is None or not isinstance(distance_cm, (int, float)):
                                 raise ValueError("Invalid distance reading")
-                            readings.distance = distance_cm / 100
+                            readings.distance = (distance_cm / 100) + laser_distance_offset
 
                             # Perform anomaly check BEFORE sending
                             strictness = Strictness(mag=mag_tolerance, grav=grav_tolerance, dip=dip_tolerance)
@@ -248,19 +267,27 @@ async def sensor_read_display_update(readings, device):
                             disco_mode.set_green()
                             sensor_manager.set_buzzer(True)
                             ble.send_message(readings.azimuth, readings.inclination, readings.distance)
+                            if not device.ble_connected:
+                                ble_disconnection_counter += 1
+                                display.update_BT_number(ble_disconnection_counter)
+                            else:
+                                ble_disconnection_counter = 0
+                                display.update_BT_number(ble_disconnection_counter)
 
                             # Append stable reading to stable buffers
                             stable_azimuth_buffer.append(readings.azimuth)
                             stable_inclination_buffer.append(readings.inclination)
+                            stable_distance_buffer.append(readings.distance)
 
                             # Keep only last 3 stable readings
                             if len(stable_azimuth_buffer) > 3:
                                 stable_azimuth_buffer.pop(0)
                                 stable_inclination_buffer.pop(0)
+                                stable_distance_buffer.pop(0)
 
                             # Check if last 3 stable readings are consistent
                             if len(stable_azimuth_buffer) == 3:
-                                if is_consistent(stable_azimuth_buffer) and is_consistent(stable_inclination_buffer):
+                                if is_consistent_leg_angle(stable_azimuth_buffer) and is_consistent_leg_angle(stable_inclination_buffer) and is_consistent_leg_distance(stable_distance_buffer):
                                     for _ in range(3):
                                         sensor_manager.set_buzzer(True)
                                         disco_mode.set_white()
@@ -269,6 +296,7 @@ async def sensor_read_display_update(readings, device):
 
                                     stable_azimuth_buffer.clear()
                                     stable_inclination_buffer.clear()
+                                    stable_distance_buffer.clear()
 
                         device.measurement_taken = True
 
@@ -364,7 +392,7 @@ async def monitor_ble_pin(device):
                 device.ble_connected = False
                 display.update_BT_label(False)
             last_value = current_value
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
 
 
 def handle_command(cmd_byte, device, sensor_manager):
@@ -400,6 +428,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
                 await asyncio.sleep(0.2)
                 disco_mode.turn_off()
                 ble_ack_received = False
+                display.update_BT_number(0)
             elif msg in COMMANDS:
                 cmd_byte = COMMANDS[msg]
                 handle_command(cmd_byte, device, sensor_manager)
