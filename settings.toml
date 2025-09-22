@@ -5,8 +5,16 @@ mag = "10.0" #degrees
 grav = "10.0" #degrees
 dip = "10.0" #degrees
 
+#Stability Tolerance
+stability_tolerance = "0.5" #sets the noise tolerance before a reading is registered, there must be 3 consistent readings within this range for it to accept the reading
+
 #Leg tolerance
-leg_tolerance = "1.7"
+leg_angle_tolerance = "1.7" #degrees - same as default setting on sexytopo
+leg_distance_tolerance = "0.05" #m - same as default setting on sexytopo
+
+
+#calibrationlaser distance offset
+laser_distance_offset = "0.14" #accounts for read of device
 
 #auto shutdown delay
 auto_shutdown_delay = 1800 #seconds
