@@ -17,8 +17,8 @@ from ble_manager import BleManager
 from disco_manager import DiscoMode
 import json
 import microcontroller
+from mag_cal.calibration import Calibration, MagErr, GravityAnomalyError, DipAnomalyError, Strictness
 from config import Config
-from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError, Strictness
 
 CONFIG = Config()
 sensor_manager = SensorManager()
@@ -154,8 +154,8 @@ async def sensor_read_display_update():
                         )
                         calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(), strictness=strictness)
 
-                    except (MagneticAnomalyError, GravityAnomalyError, DipAnomalyError) as e:
-                        print(f"❌ {type(e).__name__} detected")
+                    except (MagErr, GravityAnomalyError, DipAnomalyError) as e:
+                        print(f"❌ {type(e).__name__} Err")
                         device.readings.distance = f"{type(e).__name__} ERR"
                         disco_mode.turn_off()
                         for _ in range(4):

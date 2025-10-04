@@ -54,21 +54,19 @@ class DisplayManager:
         self.display.root_group = self.splash
 
     def update_sensor_readings(self, distance, azimuth, inclination):
-        if distance == 0:
-            self.distance_label.text = ""
-        elif isinstance(distance, str) and distance == "ERR":
-            self.distance_label.text = "ERR"
-        elif isinstance(distance, str) and distance == "Mag ERR":
-            self.distance_label.text = "Mag ERR"
-        elif isinstance(distance, str) and distance == "Grav ERR":
-            self.distance_label.text = "Grav ERR"
-        elif isinstance(distance, str) and distance == "Dip ERR":
-            self.distance_label.text = "Dip ERR"
+        # Ensure distance is numeric before formatting
+        if isinstance(distance, (int, float)):
+            if distance == 0:
+                self.distance_label.text = ""
+            else:
+                self.distance_label.text = f"{distance:.2f}m"
         else:
-            self.distance_label.text = f"{distance:.2f}m"
+            # Handles any string value, including anomaly messages
+            self.distance_label.text = str(distance)
 
         self.azimuth_label.text = f"{azimuth:.1f}°"
         self.inclination_label.text = f"{inclination:.1f}°"
+
 
     def update_distance(self, distance):
         """Update the distance label on the display. Accepts numeric or string values."""
