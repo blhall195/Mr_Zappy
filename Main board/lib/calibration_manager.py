@@ -3,6 +3,25 @@ import os
 import json
 import microcontroller
 
+class CalibrationFlags:
+    """Simple calibration flag loader — identical behavior to flat import logic."""
+    def __init__(self):
+        self.loaded_modules = []
+        self._check_and_import_flags()
+
+    def _check_and_import_flags(self):
+        if "calibration_mode.txt" in os.listdir("/"):
+            import calibration_mode
+            self.loaded_modules.append("calibration_mode")
+
+        if "calculate_ellipsoid.txt" in os.listdir("/"):
+            import calibration_calculate_ellipsoid
+            self.loaded_modules.append("calibration_calculate_ellipsoid")
+
+        if "calculate_alignment.txt" in os.listdir("/"):
+            import calibration_calculate_alignment
+            self.loaded_modules.append("calibration_calculate_alignment")
+
 class PerformCalibration:
     def __init__(self, sensor_manager, button_manager, calib):
         self.calib = calib
