@@ -3,7 +3,7 @@ import time
 import busio
 import asyncio
 import digitalio
-from adafruit_ble import BLERadio
+from adafruit_ble import BLERadio, Advertisement
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 import caveble  # Custom BLE service
 
@@ -14,7 +14,18 @@ print(f"BLE Name: {ble.name}")
 
 survey_protocol = caveble.SurveyProtocolService()
 advertisement = ProvideServicesAdvertisement(survey_protocol)
-ble.start_advertising(advertisement)
+
+# Create a scan response to include complete device name and tx power
+scan_response = Advertisement()
+scan_response.complete_name = ble.name
+scan_response.tx_power = 8  # Boost to +8 dBm
+
+# Start advertising with boosted power
+ble._adapter.start_advertising(
+    bytes(advertisement),
+    scan_response=bytes(scan_response),
+    tx_power=8  # Boost TX power to +8 dBm
+)
 
 # UART Setup
 uart = busio.UART(board.TX, board.RX, baudrate=9600, timeout=0.1)
@@ -130,11 +141,26 @@ async def monitor_ble_connection():
             if current_state:
                 print("🔵 BLE Connected")
                 ble_connected.value = True
+                # Boost TX power for all active connections
+                for conn in ble.connections:
+                    try:
+                        conn.tx_power = 8
+                        print("📶 Set connection TX power to +8 dBm")
+                    except Exception as e:
+                        print(f"⚠️ Failed to set TX power: {e}")
             else:
                 print("🔴 BLE Disconnected")
                 ble_connected.value = False
                 if not ble.connected and not ble.advertising:
-                    ble.start_advertising(advertisement)
+                    try:
+                        print("📣 Restarting BLE advertising at +8 dBm")
+                        ble._adapter.start_advertising(
+                            bytes(advertisement),
+                            scan_response=bytes(scan_response),
+                            tx_power=8
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Failed to restart advertising: {e}")
             last_state = current_state
         await asyncio.sleep(0.1)
 
