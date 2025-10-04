@@ -1,20 +1,46 @@
-# settings.toml
+# -------------------------------
+# This settings.toml file lets you adjust device parameters
+# -------------------------------
 
-#Anomoly detection tolerances
+# -------------------------------
+#Anomoly detection tolerances, if readings fall outside of the below expected ranges the device will throw an error.
+# -------------------------------
 mag = "10.0" #degrees
 grav = "10.0" #degrees
 dip = "10.0" #degrees
 
-#Stability Tolerance
-stability_tolerance = "0.4" #sets the noise tolerance before a reading is registered, there must be 3 consistent readings within this range for it to accept the reading
 
-#Leg tolerance
+# -------------------------------
+# Leg tolerances - make sure this matches your settings in SexyTopo or Topo droid, three readings within these tolerances will give a leg
+# -------------------------------
 leg_angle_tolerance = "1.7" #degrees - same as default setting on sexytopo
 leg_distance_tolerance = "0.05" #m - same as default setting on sexytopo
 
-
-#calibrationlaser distance offset
+# -------------------------------
+#calibrationlaser distance offset, input the length of the device here
+# -------------------------------
 laser_distance_offset = "0.14" #accounts for read of device
 
-#auto shutdown delay
-auto_shutdown_delay = 1800 #seconds
+
+# -------------------------------
+# Taking a Reading Stability Settings
+# -------------------------------
+
+# Tolerance for sensor noise(°). Lower = more accurate readings but slower to stabilize.
+stability_tolerance = "0.25"
+
+# Number of consecutive readings to check for stability. Lower = faster readings, less stable.
+stability_buffer_length = "8"
+
+# Exponential Moving Average (EMA) smoothing factor.
+# High α (0.8–0.9) → reacts quickly to changes, less smoothing.
+# Low α (0.1–0.2) → reacts slowly, smooths out spikes more.
+EMA_alpha = "0.2"
+
+
+# -------------------------------
+# Power Settings
+# -------------------------------
+
+#The delay between inactivity and device shutdown in seconds
+auto_shutdown_delay = 1800
