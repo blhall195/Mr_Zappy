@@ -75,8 +75,6 @@ def align_sensor_roll(self, mag_data, grav_data):
 Calibration.align_sensor_roll = align_sensor_roll
 
 import microcontroller
-from display_manager import DisplayManager
-display = DisplayManager()
 from button_manager import ButtonManager
 button_manager = ButtonManager()
 
@@ -117,7 +115,7 @@ async def main():
 
 
 
-    print(f"Accuracy: {accuracy:.3f}      Should be 0.5 or     lower)")
+    print(f"Accuracy: {accuracy:.3f}      Should be 1.0 or     lower)")
     print("")
     print("")
     print("✅ Hold 1+2 to SAVE")

@@ -75,7 +75,7 @@ class SurveyProtocolService(Service):
         super().__init__(protocol_name="SAP6")
         self.last_send_time: float = 0
         # pylint: disable=too-many-function-args
-        self.send_queue: Deque[Tuple[float, float, float, float]] = deque((), 20)
+        self.send_queue: Deque[Tuple[float, float, float, float]] = deque((), 500)
         self.sent_packet: bytes = b""
         self.last_sent_bit = 0
         self.waiting_for_ack: bool = False

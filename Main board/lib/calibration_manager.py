@@ -41,15 +41,15 @@ class PerformCalibration:
 
             mag_buffer.append(mag_data)
             grav_buffer.append(grav_data)
-            if len(mag_buffer) > 3: mag_buffer.pop(0)
-            if len(grav_buffer) > 3: grav_buffer.pop(0)
+            if len(mag_buffer) > 5: mag_buffer.pop(0)
+            if len(grav_buffer) > 5: grav_buffer.pop(0)
 
-            if waiting_for_stable_sample and len(mag_buffer) == 3 and len(grav_buffer) == 3:
-                if self._is_consistent(mag_buffer, 0.15) and self._is_consistent(grav_buffer, 0.15):
+            if waiting_for_stable_sample and len(mag_buffer) == 5 and len(grav_buffer) == 5:
+                if self._is_consistent(mag_buffer, 0.05) and self._is_consistent(grav_buffer, 0.05):
                     disco_mode.set_green()
 
-                    avg_mag = tuple(sum(axis_vals) / 3 for axis_vals in zip(*mag_buffer))
-                    avg_grav = tuple(sum(axis_vals) / 3 for axis_vals in zip(*grav_buffer))
+                    avg_mag = tuple(sum(axis_vals) / 5 for axis_vals in zip(*mag_buffer))
+                    avg_grav = tuple(sum(axis_vals) / 5 for axis_vals in zip(*grav_buffer))
 
                     self.mag_array.append(avg_mag)
                     self.grav_array.append(avg_grav)
@@ -93,15 +93,15 @@ class PerformCalibration:
 
             mag_buffer.append(mag_data)
             grav_buffer.append(grav_data)
-            if len(mag_buffer) > 3: mag_buffer.pop(0)
-            if len(grav_buffer) > 3: grav_buffer.pop(0)
+            if len(mag_buffer) > 5: mag_buffer.pop(0)
+            if len(grav_buffer) > 5: grav_buffer.pop(0)
 
-            if waiting_for_stable_sample and len(mag_buffer) == 3 and len(grav_buffer) == 3:
-                if self._is_consistent(mag_buffer, 0.3) and self._is_consistent(grav_buffer, 0.3):
+            if waiting_for_stable_sample and len(mag_buffer) == 5 and len(grav_buffer) == 5:
+                if self._is_consistent(mag_buffer, 0.05) and self._is_consistent(grav_buffer, 0.05):
                     disco_mode.set_green()
 
-                    avg_mag = tuple(sum(axis_vals) / 3 for axis_vals in zip(*mag_buffer))
-                    avg_grav = tuple(sum(axis_vals) / 3 for axis_vals in zip(*grav_buffer))
+                    avg_mag = tuple(sum(axis_vals) / 5 for axis_vals in zip(*mag_buffer))
+                    avg_grav = tuple(sum(axis_vals) / 5 for axis_vals in zip(*grav_buffer))
 
                     self.mag_array.append(avg_mag)
                     self.grav_array.append(avg_grav)
