@@ -28,7 +28,7 @@ class SensorManager:
         self._grav_maxlen = 3    # smoothing window size
 
         # Initialize mag_sensor
-        self.mag_sensor = rm3100.RM3100_I2C(i2c, i2c_address=0x20, cycle_count=1500)
+        self.mag_sensor = rm3100.RM3100_I2C(i2c, i2c_address=0x20, cycle_count=400)
 
         # Initialize bat_sensor
         self.max17 = adafruit_max1704x.MAX17048(i2c)

@@ -155,4 +155,27 @@ class DisplayManager:
         self.display.root_group = splash
         self.display.refresh()
 
+    def show_initialising_message(self):
+        """Clears the screen and displays 'Device Initialising\nPlease wait...'"""
+        self.blank_screen()  # Clear the screen first
+
+        # Create a new group for the message
+        splash = displayio.Group()
+
+        # Create label for initialisation message
+        text = "Device Initialising\nPlease wait..."
+        init_label = label.Label(
+            self.font,
+            text=text,
+            scale=1,
+            x=0,
+            y=10
+        )
+        splash.append(init_label)
+
+        # Show the group on display
+        self.display.root_group = splash
+        self.display.refresh()
+
+
 

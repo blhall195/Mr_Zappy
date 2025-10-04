@@ -8,7 +8,6 @@ import math
 
 from sensor_manager import SensorManager
 from button_manager import ButtonManager
-from display_manager import DisplayManager
 from calibration_manager import PerformCalibration
 from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError, Strictness
 from ble_manager import BleManager
@@ -19,7 +18,6 @@ try:
     from calibrate_roll import align_sensor_roll
     if not hasattr(Calibration, "align_sensor_roll"):
         Calibration.align_sensor_roll = align_sensor_roll
-        print("✅ align_sensor_roll successfully patched into Calibration")
 except Exception as e:
     print(f"❌ Failed to patch align_sensor_roll: {e}")
 
@@ -36,7 +34,6 @@ button_manager = ButtonManager()
 ble = BleManager()
 disco_mode = DiscoMode(sensor_manager, brightness=1)
 calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
-display = DisplayManager()
 
 # Store readings
 class Readings:

@@ -27,8 +27,6 @@ calib.set_field_characteristics(mag_array, grav_array)
 calib.set_expected_mean_dip(mag_array, grav_array)
 calibration_dict = calib.as_dict() #load calibration into dictionary
 
-from display_manager import DisplayManager
-display = DisplayManager()
 time.sleep(0.5)
 from button_manager import ButtonManager
 button_manager = ButtonManager()
