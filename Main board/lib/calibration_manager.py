@@ -2,6 +2,8 @@ import asyncio
 import os
 import json
 import microcontroller
+from config import Config
+CONFIG = Config()
 
 class CalibrationFlags:
     """Simple calibration flag loader — identical behavior to flat import logic."""
