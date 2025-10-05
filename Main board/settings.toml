@@ -8,7 +8,7 @@
 mag = "10.0" #degrees
 grav = "10.0" #degrees
 dip = "10.0" #degrees
-anomaly_detection = "True"
+anomaly_detection = "False"
 
 
 # -------------------------------
@@ -16,7 +16,7 @@ anomaly_detection = "True"
 # -------------------------------
 
 #The delay between inactivity and device shutdown in seconds
-auto_shutdown_timeout = 3600
+auto_shutdown_timeout = 1800
 laser_timeout = 120
 
 # -------------------------------
