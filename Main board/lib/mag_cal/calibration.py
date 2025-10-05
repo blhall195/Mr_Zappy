@@ -48,7 +48,7 @@ class DipAnomalyError(CalibrationError):
     """
 
 
-class MagErr(CalibrationError):
+class MagneticAnomalyError(CalibrationError):
     """
     Magnetic field strength is not what we would expect it to be
     """
@@ -676,7 +676,7 @@ class Calibration:
         try:
             self.mag.raise_if_anomaly(mag, strictness.mag / 100)
         except SensorError as exc:
-            raise MagErr(exc.args) from exc
+            raise MagneticAnomalyError(exc.args) from exc
         try:
             self.grav.raise_if_anomaly(grav, strictness.grav / 100)
         except SensorError as exc:

@@ -32,7 +32,7 @@ There are several axis conventions used.
 from .calibration import (
     Calibration,
     Strictness,
-    MagErr,
+    MagneticAnomalyError,
     DipAnomalyError,
     GravityAnomalyError,
 )

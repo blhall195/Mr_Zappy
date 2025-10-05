@@ -130,7 +130,7 @@ class DisplayManager:
         self.display.root_group = splash
         self.display.refresh()
 
-    def show_starting_calibration(self):
+    def show_starting_menu(self):
         """Clears the screen and displays 'Starting Calibration'."""
         # First, blank the screen
         self.blank_screen()
@@ -139,7 +139,7 @@ class DisplayManager:
         splash = displayio.Group()
 
         # Create label for "Starting Calibration"
-        text = "Starting\nCalibration"
+        text = "Starting\nMenu"
         calibration_label = label.Label(
             self.font,
             text=text,
