@@ -26,20 +26,11 @@ buttons = ButtonManager()
 SETTINGS_FILE = "settings.toml"
 laser_timeout = CONFIG.laser_timeout
 auto_shutdown_timeout = CONFIG.auto_shutdown_timeout
-anomaly_detection_bool = CONFIG.anomaly_detection
 accuracy = CONFIG.accuracy
 
-# --- Setup display ---
-displayio.release_displays()
-i2c = board.I2C()
-display_bus = displayio.I2CDisplay(i2c, device_address=0x3d)
-display = SH1107(
-    display_bus,
-    width=128,
-    height=128,
-    display_offset=DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297,
-    rotation=180
-)
+anomaly_detection_bool = CONFIG.anomaly_detection
+
+
 
 # --- Helper functions ---
 def save_readings():
@@ -67,11 +58,15 @@ def anomaly_detection(value):
         # Read the file
         with open(SETTINGS_FILE, "r") as f:
             lines = f.readlines()
-        # Replace the laser_timeout line
+        # Replace the anomaly_detection line
         with open(SETTINGS_FILE, "w") as f:
             for line in lines:
                 if line.strip().startswith("anomaly_detection"):
-                    f.write(f"anomaly_detection = {value}\n")
+                    # Keep quotes if value is a string
+                    if isinstance(value, str):
+                        f.write(f'anomaly_detection = "{value}"\n')
+                    else:
+                        f.write(f"anomaly_detection = {value}\n")
                 else:
                     f.write(line)
         print(f"anomaly_detection updated to {value} in {SETTINGS_FILE}")
@@ -82,6 +77,7 @@ def anomaly_detection(value):
     menu_structure = get_menu_structure()
     build_submenus(menu, menu_structure)
     menu.show_menu()
+
 
 
 def set_accuracy(level):
@@ -208,7 +204,7 @@ def get_menu_structure():
     return [
         ("Save_readings", save_readings),
         ("Enter Calibration", enter_calibration_mode),
-        ("Anomoly Detec: " + ("On" if anomaly_detection_bool == "True" else "Off"), [
+        ("Anomoly Detec: " + ("On" if anomaly_detection_bool else "Off"), [
             ("On", lambda: anomaly_detection("True")),
             ("Off", lambda: anomaly_detection("False")),
         ]),
@@ -254,11 +250,26 @@ def active_menu(m):
         m = m._activated_submenu
     return m
 
+# --- Setup display ---
+displayio.release_displays()
+i2c = board.I2C()
+display_bus = displayio.I2CDisplay(i2c, device_address=0x3d)
+display = SH1107(
+    display_bus,
+    width=128,
+    height=128,
+    display_offset=DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297,
+    rotation=180
+)
+
 # --- Build the menu ---
 menu = Menu(display, height=128, width=128, title="Main Menu")
 menu_structure = get_menu_structure()
 build_submenus(menu, menu_structure)
 menu.show_menu()
+
+
+
 
 
 # --- Main loop ---

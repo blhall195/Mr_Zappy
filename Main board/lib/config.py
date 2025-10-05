@@ -6,7 +6,8 @@ class Config:
         self.mag_tolerance = float(os.getenv("mag") or 10.0)
         self.grav_tolerance = float(os.getenv("grav") or 10.0)
         self.dip_tolerance = float(os.getenv("dip") or 10.0)
-        self.anomaly_detection = os.getenv("anomaly_detection", True)  # default True
+        self.anomaly_detection = os.getenv("anomaly_detection", "False").lower() in ("true", "1", "yes")
+
 
         # Stability settings
         self.accuracy = os.getenv("accuracy", "Medium")  # default True

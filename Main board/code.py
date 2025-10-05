@@ -57,6 +57,7 @@ class DeviceContext:
         self.laser_enabled = False
         self.buzzer_enabled = False
         self.disco_on = False
+        self.laser_on_flag = False
         self.current_disco_color = None
         self.ble_connected = False
         self.ble_disconnection_counter = 0
@@ -151,7 +152,9 @@ async def sensor_read_display_update():
                             grav=CONFIG.grav_tolerance,
                             dip=CONFIG.dip_tolerance
                         )
-                        calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(), strictness=strictness)
+                        if CONFIG.anomaly_detection:
+                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(), strictness=strictness)
+
 
                     except (MagneticAnomalyError, GravityAnomalyError, DipAnomalyError) as e:
                         abbrev_map = {
@@ -227,21 +230,23 @@ async def sensor_read_display_update():
 
 async def watch_for_button_presses():
     calibrate_button_start = None
-    laser_flag = False
+    device.laser_on_flag = False
 
     while True:
         button_manager.update()
         # Button logic
         if button_manager.was_pressed("Button 1"):
             device.last_activity_time = time.monotonic()
-            if laser_flag:
+            print(device.laser_enabled)
+            if device.laser_enabled:
+                device.current_state = SystemState.TAKING_MEASURMENT
+                device.measurement_taken = False
+                device.laser_enabled = True
+            elif device.current_state == SystemState.IDLE:
                 sensor_manager.set_buzzer(True)
                 sensor_manager.set_laser(True)
                 sensor_manager.set_buzzer(False)
-                laser_flag = False
-            elif device.current_state == SystemState.IDLE:
-                device.current_state = SystemState.TAKING_MEASURMENT
-                device.measurement_taken = False
+                device.laser_enabled = True
             else:
                 print("System busy, ignoring button press.")
                 device.current_state = SystemState.IDLE
@@ -253,7 +258,7 @@ async def watch_for_button_presses():
                 device.disco_on = False
                 sensor_manager.set_buzzer(False)
                 sensor_manager.set_laser(False)
-                laser_flag = True
+                device.laser_enabled = False
             else:
                 sensor_manager.set_buzzer(False)
                 disco_mode.start_disco()
@@ -269,12 +274,17 @@ async def watch_for_button_presses():
                 if held_time >= 2.0 and device.current_state == SystemState.IDLE:
                     print("Entering calibration mode (Button 3 held 2s)")
                     display.show_starting_menu()
+                    sensor_manager.set_laser(False)
                     device.current_state = SystemState.MENU
                     calibrate_button_start = None
         elif calibrate_button_start is not None:
             calibrate_button_start = None
 
-        await asyncio.sleep(0.0005)
+          # Adaptive delay to improve CPU perfomance when taking a measurment
+        if device.current_state == SystemState.TAKING_MEASURMENT:
+            await asyncio.sleep(0.05)  # longer delay during measurement
+        else:
+            await asyncio.sleep(0)  # very short delay otherwise
 
 
 async def check_battery_sensor():
@@ -336,7 +346,11 @@ async def monitor_ble_uart():
             else:
                 print(f"❌ Unknown command received: {cmd}")
 
-        await asyncio.sleep(0.01)
+          # Adaptive delay
+        if device.current_state == SystemState.TAKING_MEASURMENT:
+            await asyncio.sleep(0.1)  # longer delay during measurement
+        else:
+            await asyncio.sleep(0.01)  # very short delay otherwise
 
 
 
@@ -346,9 +360,23 @@ async def auto_switch_off_timeount():
         if now - device.last_activity_time > CONFIG.auto_shutdown_timeout:
             try:
                 print("Inactivity timeout, shutting down device")
+                #insert shutdown code
             except Exception as e:
                 print(f"Error shutting down device: {e}")
         await asyncio.sleep(5)
+
+async def laser_timeout_watch():
+    while True:
+        now = time.monotonic()
+        if device.laser_enabled and (now - device.last_activity_time > CONFIG.laser_timeout):
+            try:
+                print("Laser timeout reached, turning laser off")
+                sensor_manager.set_laser(False)
+                device.laser_enabled = False
+            except Exception as e:
+                print(f"Error turning off laser: {e}")
+        await asyncio.sleep(1)  # check every second
+
 
 
 async def main():
@@ -358,7 +386,8 @@ async def main():
         asyncio.create_task(check_battery_sensor()),
         asyncio.create_task(monitor_ble_pin()),
         asyncio.create_task(monitor_ble_uart()),
-        asyncio.create_task(auto_switch_off_timeount())
+        asyncio.create_task(auto_switch_off_timeount()),
+        asyncio.create_task(laser_timeout_watch())
     ]
 
     while True:
@@ -375,4 +404,3 @@ async def main():
                 microcontroller.reset()
 
 asyncio.run(main())
-# Write your code here :-)
