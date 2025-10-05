@@ -27,7 +27,6 @@ SETTINGS_FILE = "settings.toml"
 laser_timeout = CONFIG.laser_timeout
 auto_shutdown_timeout = CONFIG.auto_shutdown_timeout
 accuracy = CONFIG.accuracy
-
 anomaly_detection_bool = CONFIG.anomaly_detection
 
 
@@ -52,8 +51,7 @@ def enter_calibration_mode():
 
 def anomaly_detection(value):
     global anomaly_detection_bool, menu
-    anomaly_detection_bool = value
-    print(f"Anom Det: {anomaly_detection_bool}")
+    anomaly_detection_bool = value.lower() in ("true", "1", "yes")
     try:
         # Read the file
         with open(SETTINGS_FILE, "r") as f:

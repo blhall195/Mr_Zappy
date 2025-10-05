@@ -16,7 +16,6 @@ trigger_pin.pull = digitalio.Pull.UP
 if trigger_pin.value:
     # A4 is HIGH (default) — read-only flash, normal USB
     storage.remount("/", readonly=False)
-    usb_cdc.disable()
     usb_midi.disable()
     usb_hid.disable()
 else:

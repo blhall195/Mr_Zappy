@@ -139,7 +139,7 @@ class DisplayManager:
         splash = displayio.Group()
 
         # Create label for "Starting Calibration"
-        text = "Starting\nMenu"
+        text = "Starting\nMenu\nIf this takes longer\n than 10 seconds\n turn the device\n on/off again\n and reattempt"
         calibration_label = label.Label(
             self.font,
             text=text,

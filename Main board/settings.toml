@@ -16,8 +16,8 @@ anomaly_detection = "True"
 # -------------------------------
 
 #The delay between inactivity and device shutdown in seconds
-auto_shutdown_timeout = 7200
-laser_timeout = 30
+auto_shutdown_timeout = 3600
+laser_timeout = 120
 
 # -------------------------------
 #calibrationlaser distance offset, input the length of the device here
