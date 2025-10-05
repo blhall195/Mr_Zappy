@@ -17,7 +17,7 @@ from ble_manager import BleManager
 from disco_manager import DiscoMode
 import json
 import microcontroller
-from mag_cal.calibration import Calibration, MagErr, GravityAnomalyError, DipAnomalyError, Strictness
+from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError, Strictness
 from config import Config
 
 CONFIG = Config()
@@ -34,7 +34,7 @@ ble_status_pin.pull = digitalio.Pull.DOWN
 class SystemState:
     IDLE = "IDLE"
     TAKING_MEASURMENT = "TAKING_MEASURMENT"
-    CALIBRATING = "CALIBRATING"
+    MENU = "MENU"
     DISPLAYING = "DISPLAYING"
 
 class Readings:
@@ -81,7 +81,7 @@ try:
     device.readings.calib_updated = calib.from_dict(calibration_dict)
 except OSError:
     print("Calibration file not found, please calibrate the device.")
-    device.current_state = SystemState.CALIBRATING
+    device.current_state = SystemState.MENU
 
 
 # ===== Helper Functions =====
@@ -124,7 +124,6 @@ async def sensor_read_display_update():
             alpha = CONFIG.EMA_alpha
             new_az = alpha * device.readings.azimuth + (1-alpha) * device.azimuth_buffer[-1] if device.azimuth_buffer else device.readings.azimuth
             new_inc = alpha * device.readings.inclination + (1-alpha) * device.inclination_buffer[-1] if device.inclination_buffer else device.readings.inclination
-            print((new_az,))
 
             device.azimuth_buffer.append(new_az)
             device.inclination_buffer.append(new_inc)
@@ -154,9 +153,15 @@ async def sensor_read_display_update():
                         )
                         calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(), strictness=strictness)
 
-                    except (MagErr, GravityAnomalyError, DipAnomalyError) as e:
+                    except (MagneticAnomalyError, GravityAnomalyError, DipAnomalyError) as e:
+                        abbrev_map = {
+                            "MagneticAnomalyError": "MagErr",
+                            "GravityAnomalyError": "GravErr",
+                            "DipAnomalyError": "DipErr"
+                        }
+                        short_err = abbrev_map.get(type(e).__name__, "Err")
                         print(f"❌ {type(e).__name__} Err")
-                        device.readings.distance = f"{type(e).__name__} ERR"
+                        device.readings.distance = short_err
                         disco_mode.turn_off()
                         for _ in range(4):
                             disco_mode.set_red()
@@ -263,8 +268,8 @@ async def watch_for_button_presses():
                 held_time = time.monotonic() - calibrate_button_start
                 if held_time >= 2.0 and device.current_state == SystemState.IDLE:
                     print("Entering calibration mode (Button 3 held 2s)")
-                    display.show_starting_calibration()
-                    device.current_state = SystemState.CALIBRATING
+                    display.show_starting_menu()
+                    device.current_state = SystemState.MENU
                     calibrate_button_start = None
         elif calibrate_button_start is not None:
             calibrate_button_start = None
@@ -310,7 +315,7 @@ async def monitor_ble_uart():
                 print("✅ ACK1 received")
             elif cmd == 0x31:  # START_CAL
                 print("⚙️ START_CAL received")
-                device.current_state = SystemState.CALIBRATING
+                device.current_state = SystemState.MENU
             elif cmd == 0x30:  # STOP_CAL
                 print("⚙️ STOP_CAL received")
                 device.current_state = SystemState.IDLE
@@ -338,7 +343,7 @@ async def monitor_ble_uart():
 async def auto_switch_off_timeount():
     while True:
         now = time.monotonic()
-        if now - device.last_activity_time > CONFIG.auto_shutdown_delay:
+        if now - device.last_activity_time > CONFIG.auto_shutdown_timeout:
             try:
                 print("Inactivity timeout, shutting down device")
             except Exception as e:
@@ -357,16 +362,17 @@ async def main():
     ]
 
     while True:
-        while device.current_state != SystemState.CALIBRATING:
+        while device.current_state != SystemState.MENU:
             await asyncio.sleep(0.2)
 
-        if "calibration_mode.txt" not in os.listdir("/"):
+        if "menu_mode.txt" not in os.listdir("/"):
             try:
-                with open("/calibration_mode.txt", "w") as f:
+                with open("/menu_mode.txt", "w") as f:
                     f.write("1")
                 microcontroller.reset()
             except OSError as e:
-                print(f"Failed to write calibration_mode.txt: {e}")
+                print(f"Failed to write menu_mode.txt: {e}")
                 microcontroller.reset()
 
 asyncio.run(main())
+# Write your code here :-)

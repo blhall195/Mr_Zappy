@@ -8,6 +8,21 @@
 mag = "10.0" #degrees
 grav = "10.0" #degrees
 dip = "10.0" #degrees
+anomaly_detection = "True"
+
+
+# -------------------------------
+# Power Settings
+# -------------------------------
+
+#The delay between inactivity and device shutdown in seconds
+auto_shutdown_timeout = 7200
+laser_timeout = 900
+
+# -------------------------------
+#calibrationlaser distance offset, input the length of the device here
+# -------------------------------
+laser_distance_offset = "0.14" #accounts for read of device
 
 
 # -------------------------------
@@ -17,30 +32,16 @@ leg_angle_tolerance = "1.7" #degrees - same as default setting on sexytopo
 leg_distance_tolerance = "0.05" #m - same as default setting on sexytopo
 
 # -------------------------------
-#calibrationlaser distance offset, input the length of the device here
+# Stability Settings (Set while taking a reading)
 # -------------------------------
-laser_distance_offset = "0.14" #accounts for read of device
-
-
-# -------------------------------
-# Taking a Reading Stability Settings
-# -------------------------------
+#accuracy this is just a status for the menu, it doesn't actually do anything
+accuracy = "Medium"
 
 # Tolerance for sensor noise(°). Lower = more accurate readings but slower to stabilize.
 stability_tolerance = "0.25"
 
 # Number of consecutive readings to check for stability. Lower = faster readings, less stable.
-stability_buffer_length = "8"
+stability_buffer_length = 6
 
-# Exponential Moving Average (EMA) smoothing factor.
-# High α (0.8–0.9) → reacts quickly to changes, less smoothing.
-# Low α (0.1–0.2) → reacts slowly, smooths out spikes more.
-EMA_alpha = "0.2"
-
-
-# -------------------------------
-# Power Settings
-# -------------------------------
-
-#The delay between inactivity and device shutdown in seconds
-auto_shutdown_delay = 1800
+# Exponential Moving Average (EMA) smoothing factor. High α (0.8–0.9) → reacts quickly to changes, less smoothing. Low α (0.1–0.2) → reacts slowly, smooths out spikes more.
+EMA_alpha = "0.5"

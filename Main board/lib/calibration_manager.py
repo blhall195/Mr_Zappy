@@ -24,6 +24,10 @@ class CalibrationFlags:
             import calibration_calculate_alignment
             self.loaded_modules.append("calibration_calculate_alignment")
 
+        if "menu_mode.txt" in os.listdir("/"):
+            import menu_manager
+            self.loaded_modules.append("menu_manager")
+
 class PerformCalibration:
     def __init__(self, sensor_manager, button_manager, calib):
         self.calib = calib
