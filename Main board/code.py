@@ -24,6 +24,9 @@ from config import Config
 
 CONFIG = Config()
 sensor_manager = SensorManager()
+sensor_manager.set_buzzer(False)
+sensor_manager.set_laser(True)
+sensor_manager.set_buzzer(True)
 button_manager = ButtonManager()
 ble = BleManager()
 disco_mode = DiscoMode(sensor_manager, brightness=1)
