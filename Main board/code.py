@@ -99,7 +99,7 @@ def update_readings():
 async def sensor_read_display_update():
     while True:
         if device.current_state == SystemState.IDLE:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2) #leave this at 0.2, otherwise you won't be able to use the menu for some reason
             continue
 
         elif device.current_state == SystemState.TAKING_MEASURMENT:
@@ -276,11 +276,19 @@ async def watch_for_button_presses():
                 held_time = time.monotonic() - calibrate_button_start
                 if held_time >= 2.0 and device.current_state == SystemState.IDLE:
                     print("Entering calibration mode (Button 3 held 2s)")
-                    display.show_starting_menu()
+                    #display.show_starting_menu()
                     sensor_manager.set_laser(False)
-                    device.current_state = SystemState.MENU
-                    calibrate_button_start = None
-        elif calibrate_button_start is not None:
+                    # Write file and reset once
+                    if "menu_mode.txt" not in os.listdir("/"):
+                        try:
+                            with open("/menu_mode.txt", "w") as f:
+                                f.write("1")
+                            microcontroller.reset()
+                        except OSError as e:
+                            print(f"Failed to write menu_mode.txt: {e}")
+                            microcontroller.reset()
+                    calibrate_button_start = None  # reset after triggering
+        else:
             calibrate_button_start = None
 
           # Adaptive delay to improve CPU perfomance when taking a measurment
@@ -397,13 +405,6 @@ async def main():
         while device.current_state != SystemState.MENU:
             await asyncio.sleep(0.2)
 
-        if "menu_mode.txt" not in os.listdir("/"):
-            try:
-                with open("/menu_mode.txt", "w") as f:
-                    f.write("1")
-                microcontroller.reset()
-            except OSError as e:
-                print(f"Failed to write menu_mode.txt: {e}")
-                microcontroller.reset()
+
 
 asyncio.run(main())
