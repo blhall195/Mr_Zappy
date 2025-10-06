@@ -1,6 +1,9 @@
 from display_manager import DisplayManager
 display = DisplayManager()
 print("Loading\nPlease wait...")
+import time
+time.sleep(0.2)
+
 
 from calibration_manager import CalibrationFlags
 calibration_flags = CalibrationFlags()
@@ -9,7 +12,6 @@ import os
 import asyncio
 import board
 import digitalio
-import time
 import math
 from sensor_manager import SensorManager
 from button_manager import ButtonManager
@@ -54,10 +56,10 @@ class DeviceContext:
         self.measurement_taken = False
 
         # Shared flags & buffers
-        self.laser_enabled = False
+        self.laser_enabled = True
         self.buzzer_enabled = False
         self.disco_on = False
-        self.laser_on_flag = False
+        self.laser_on_flag = True
         self.current_disco_color = None
         self.ble_connected = False
         self.ble_disconnection_counter = 0
@@ -97,7 +99,7 @@ def update_readings():
 async def sensor_read_display_update():
     while True:
         if device.current_state == SystemState.IDLE:
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.05)
             continue
 
         elif device.current_state == SystemState.TAKING_MEASURMENT:
@@ -227,6 +229,7 @@ async def sensor_read_display_update():
                     disco_mode.turn_off()
                     device.current_disco_color = None
                     device.current_state = SystemState.IDLE
+
 
 async def watch_for_button_presses():
     calibrate_button_start = None
