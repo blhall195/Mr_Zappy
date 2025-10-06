@@ -30,6 +30,7 @@ if "calibration_mode.txt" in os.listdir("/"):
 
 # Initialize all components
 sensor_manager = SensorManager()
+sensor_manager.set_laser(True)
 button_manager = ButtonManager()
 ble = BleManager()
 disco_mode = DiscoMode(sensor_manager, brightness=1)
