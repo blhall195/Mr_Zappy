@@ -1,9 +1,9 @@
+import time
+time.sleep(0.5)#gives the boards power rails a moment to stabilise before starting
+
 from display_manager import DisplayManager
 display = DisplayManager()
 print("Loading\nPlease wait...")
-import time
-time.sleep(0.2)
-
 
 from calibration_manager import CalibrationFlags
 calibration_flags = CalibrationFlags()
@@ -30,6 +30,7 @@ sensor_manager.set_buzzer(True)
 button_manager = ButtonManager()
 ble = BleManager()
 disco_mode = DiscoMode(sensor_manager, brightness=1)
+time.sleep(0.05)#prevents brownout
 display.display_screen_initialise()
 
 ble_status_pin = digitalio.DigitalInOut(board.D11)
@@ -84,11 +85,10 @@ try:
     with open("/calibration_dict.json", "r") as f:
         calibration_dict = json.load(f)
     calib = calib.from_dict(calibration_dict)
-    device.readings.calib_updated = calib.from_dict(calibration_dict)
+    device.readings.calib_updated = calib
 except OSError:
     print("Calibration file not found, please calibrate the device.")
     device.current_state = SystemState.MENU
-
 
 # ===== Helper Functions =====
 def update_readings():
@@ -296,9 +296,9 @@ async def watch_for_button_presses():
 
           # Adaptive delay to improve CPU perfomance when taking a measurment
         if device.current_state == SystemState.TAKING_MEASURMENT:
-            await asyncio.sleep(0.05)  # longer delay during measurement
+            await asyncio.sleep(0.1)  # longer delay during measurement
         else:
-            await asyncio.sleep(0)  # very short delay otherwise
+            await asyncio.sleep(0.05)  # very short delay otherwise
 
 
 async def check_battery_sensor():
