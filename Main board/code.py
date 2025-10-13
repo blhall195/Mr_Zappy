@@ -1,5 +1,21 @@
 import time
-time.sleep(0.5)#gives the boards power rails a moment to stabilise before starting
+time.sleep(0.2)
+
+import board
+import digitalio
+
+laser_power = digitalio.DigitalInOut(board.A1)
+laser_power.direction = digitalio.Direction.OUTPUT
+laser_power.switch_to_output(True)
+
+pwr_pin = digitalio.DigitalInOut(board.A2)
+pwr_pin.direction = digitalio.Direction.OUTPUT
+pwr_pin.value = False  # sets A1 high
+
+ble_status_pin = digitalio.DigitalInOut(board.D11)
+ble_status_pin.direction = digitalio.Direction.INPUT
+ble_status_pin.pull = digitalio.Pull.DOWN
+
 
 from display_manager import DisplayManager
 display = DisplayManager()
@@ -10,8 +26,6 @@ calibration_flags = CalibrationFlags()
 
 import os
 import asyncio
-import board
-import digitalio
 import math
 from sensor_manager import SensorManager
 from button_manager import ButtonManager
@@ -32,10 +46,6 @@ ble = BleManager()
 disco_mode = DiscoMode(sensor_manager, brightness=1)
 time.sleep(0.05)#prevents brownout
 display.display_screen_initialise()
-
-ble_status_pin = digitalio.DigitalInOut(board.D11)
-ble_status_pin.direction = digitalio.Direction.INPUT
-ble_status_pin.pull = digitalio.Pull.DOWN
 
 class SystemState:
     IDLE = "IDLE"
@@ -93,145 +103,158 @@ except OSError:
 # ===== Helper Functions =====
 def update_readings():
     try:
-        device.readings.azimuth, device.readings.inclination, device.readings.roll = \
-            device.readings.calib_updated.get_angles(sensor_manager.get_mag(), sensor_manager.get_grav())
+        mag = sensor_manager.get_mag()
+        grav = sensor_manager.get_grav()
+        angles = device.readings.calib_updated.get_angles(mag, grav)
+        device.readings.azimuth, device.readings.inclination, device.readings.roll = angles
     except Exception as e:
-        print(e)
+        print(f"[ERROR] update_readings exception: {type(e).__name__}: {e}")
 
-# ===== Async Tasks =====
+def ema_stable_update(new_az, new_inc):
+    alpha = CONFIG.EMA_alpha
+
+    prev_az = device.azimuth_buffer[-1] if device.azimuth_buffer else new_az
+    prev_inc = device.inclination_buffer[-1] if device.inclination_buffer else new_inc
+
+    smoothed_az = alpha * new_az + (1 - alpha) * prev_az
+    smoothed_inc = alpha * new_inc + (1 - alpha) * prev_inc
+
+    device.azimuth_buffer.append(smoothed_az)
+    device.inclination_buffer.append(smoothed_inc)
+
+    if len(device.azimuth_buffer) > CONFIG.stability_buffer_length:
+        device.azimuth_buffer.pop(0)
+        device.inclination_buffer.pop(0)
+
+    if len(device.azimuth_buffer) < CONFIG.stability_buffer_length:
+        return False, smoothed_az, smoothed_inc
+
+    az_diff = max(device.azimuth_buffer) - min(device.azimuth_buffer)
+    inc_diff = max(device.inclination_buffer) - min(device.inclination_buffer)
+    stable = az_diff < CONFIG.stability_tolerance and inc_diff < CONFIG.stability_tolerance
+
+    return stable, smoothed_az, smoothed_inc
+
+async def alert_error(err_code, flashes=4):
+    try:
+        device.readings.distance = err_code
+        disco_mode.turn_off()
+        for _ in range(flashes):
+            disco_mode.set_red()
+            await asyncio.sleep(0.1)
+            disco_mode.turn_off()
+            await asyncio.sleep(0.1)
+        sensor_manager.set_buzzer(True)
+        device.buzzer_enabled = False
+        sensor_manager.set_laser(True)
+        device.measurement_taken = True
+    except Exception as e:
+        print(f"[ERROR] alert_error exception: {type(e).__name__}: {e}")
+
+async def handle_success():
+    try:
+        disco_mode.set_green()
+        sensor_manager.set_laser(True)
+        await asyncio.sleep(0.1)
+        sensor_manager.set_buzzer(True)
+        sensor_manager.set_laser(False)
+        await asyncio.sleep(0.1)
+        sensor_manager.set_laser(True)
+        device.buzzer_enabled = False
+
+        ble.send_message(device.readings.azimuth, device.readings.inclination, device.readings.distance)
+
+        device.ble_disconnection_counter = 0 if device.ble_connected else device.ble_disconnection_counter + 1
+        display.update_BT_number(device.ble_disconnection_counter)
+
+        device.stable_azimuth_buffer.append(device.readings.azimuth)
+        device.stable_inclination_buffer.append(device.readings.inclination)
+        device.stable_distance_buffer.append(device.readings.distance)
+
+        if len(device.stable_azimuth_buffer) > 3:
+            device.stable_azimuth_buffer.pop(0)
+            device.stable_inclination_buffer.pop(0)
+            device.stable_distance_buffer.pop(0)
+
+        if len(device.stable_azimuth_buffer) == 3:
+            if all(abs(device.stable_azimuth_buffer[0]-v)<CONFIG.leg_angle_tolerance for v in device.stable_azimuth_buffer):
+                for _ in range(3):
+                    sensor_manager.set_buzzer(True)
+                    disco_mode.set_white()
+                    await asyncio.sleep(0.1)
+                    disco_mode.turn_off()
+                device.stable_azimuth_buffer.clear()
+                device.stable_inclination_buffer.clear()
+                device.stable_distance_buffer.clear()
+
+        device.measurement_taken = True
+    except Exception as e:
+        print(f"[ERROR] handle_success exception: {type(e).__name__}: {e}")
+
+# ===== Async Task =====
 async def sensor_read_display_update():
     while True:
-        if device.current_state == SystemState.IDLE:
-            await asyncio.sleep(0.2) #leave this at 0.2, otherwise you won't be able to use the menu for some reason
-            continue
+        try:
+            if device.current_state == SystemState.IDLE:
+                await asyncio.sleep(0.2)
+                continue
 
-        elif device.current_state == SystemState.TAKING_MEASURMENT:
-            # Handle laser & buzzer
+            if device.current_state != SystemState.TAKING_MEASURMENT or device.measurement_taken:
+                await asyncio.sleep(0.05)
+                continue
+
             if not device.buzzer_enabled:
                 sensor_manager.set_buzzer(True)
                 sensor_manager.set_buzzer(False)
                 device.buzzer_enabled = True
 
             if device.current_disco_color != "red":
-                disco_mode.turn_off()
-                disco_mode.set_red()
                 device.current_disco_color = "red"
+                disco_mode.set_red()
+
 
             if not device.laser_enabled:
                 sensor_manager.set_laser(True)
                 device.laser_enabled = True
 
-            if device.measurement_taken:
-                await asyncio.sleep(0.05)
-                continue
-
-            # Update readings and buffers
             update_readings()
-            alpha = CONFIG.EMA_alpha
-            new_az = alpha * device.readings.azimuth + (1-alpha) * device.azimuth_buffer[-1] if device.azimuth_buffer else device.readings.azimuth
-            new_inc = alpha * device.readings.inclination + (1-alpha) * device.inclination_buffer[-1] if device.inclination_buffer else device.readings.inclination
+            stable, smoothed_az, smoothed_inc = ema_stable_update(device.readings.azimuth, device.readings.inclination)
 
-            device.azimuth_buffer.append(new_az)
-            device.inclination_buffer.append(new_inc)
-            if len(device.azimuth_buffer) > CONFIG.stability_buffer_length:
-                device.azimuth_buffer.pop(0)
-                device.inclination_buffer.pop(0)
+            if stable:
+                device.readings.azimuth = smoothed_az
+                device.readings.inclination = smoothed_inc
 
-            if len(device.azimuth_buffer) == CONFIG.stability_buffer_length:
-                az_diff = max(device.azimuth_buffer) - min(device.azimuth_buffer)
-                inc_diff = max(device.inclination_buffer) - min(device.inclination_buffer)
+                try:
+                    distance_cm = sensor_manager.get_distance()
+                    if distance_cm is None or not isinstance(distance_cm, (int, float)):
+                        raise ValueError("Invalid distance reading")
+                    device.readings.distance = (distance_cm / 100) + CONFIG.laser_distance_offset
 
-                if az_diff < CONFIG.stability_tolerance and inc_diff < CONFIG.stability_tolerance:
-                    # Can either use last EMA value or further smooth it
-                    device.readings.azimuth = new_az
-                    device.readings.inclination = new_inc
+                    if CONFIG.anomaly_detection:
+                        strictness = Strictness(CONFIG.mag_tolerance, CONFIG.grav_tolerance, CONFIG.dip_tolerance)
+                        calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(), strictness)
 
-                    try:
-                        distance_cm = sensor_manager.get_distance()
-                        if distance_cm is None or not isinstance(distance_cm, (int, float)):
-                            raise ValueError("Invalid distance reading")
-                        device.readings.distance = (distance_cm / 100) + CONFIG.laser_distance_offset
+                except (MagneticAnomalyError, GravityAnomalyError, DipAnomalyError) as e:
+                    abbrev = {"MagneticAnomalyError":"MagErr","GravityAnomalyError":"GravErr","DipAnomalyError":"DipErr"}
+                    await alert_error(abbrev.get(type(e).__name__, "Err"))
 
-                        strictness = Strictness(
-                            mag=CONFIG.mag_tolerance,
-                            grav=CONFIG.grav_tolerance,
-                            dip=CONFIG.dip_tolerance
-                        )
-                        if CONFIG.anomaly_detection:
-                            calib.raise_if_anomaly(sensor_manager.get_mag(), sensor_manager.get_grav(), strictness=strictness)
+                except Exception as e:
+                    print(f"[ERROR] Distance read failed: {type(e).__name__}: {e}")
+                    await alert_error("ERR")
 
+                else:
+                    await handle_success()
 
-                    except (MagneticAnomalyError, GravityAnomalyError, DipAnomalyError) as e:
-                        abbrev_map = {
-                            "MagneticAnomalyError": "MagErr",
-                            "GravityAnomalyError": "GravErr",
-                            "DipAnomalyError": "DipErr"
-                        }
-                        short_err = abbrev_map.get(type(e).__name__, "Err")
-                        print(f"❌ {type(e).__name__} Err")
-                        device.readings.distance = short_err
-                        disco_mode.turn_off()
-                        for _ in range(4):
-                            disco_mode.set_red()
-                            await asyncio.sleep(0.1)
-                            disco_mode.turn_off()
-                            await asyncio.sleep(0.1)
-                        sensor_manager.set_buzzer(True)
-                        device.buzzer_enabled = False
-                        sensor_manager.set_laser(True)
-                        device.measurement_taken = True
-                    except Exception as e:
-                        print(f"❌ Distance read failed: {e}")
-                        sensor_manager.set_buzzer(True)
-                        device.buzzer_enabled = False
-                        sensor_manager.set_laser(True)
-                        device.readings.distance = "ERR"
-                    else:
-                        # No anomaly: send BLE
-                        disco_mode.set_green()
-                        sensor_manager.set_laser(True)
-                        await asyncio.sleep(0.1)
-                        sensor_manager.set_buzzer(True)
-                        sensor_manager.set_laser(False)
-                        await asyncio.sleep(0.1)
-                        sensor_manager.set_laser(True)
-                        device.buzzer_enabled = False
-                        ble.send_message(device.readings.azimuth, device.readings.inclination, device.readings.distance)
+                display.update_sensor_readings(device.readings.distance, device.readings.azimuth, device.readings.inclination)
+                disco_mode.turn_off()
+                device.current_disco_color = None
+                device.current_state = SystemState.IDLE
 
-                        # BLE counters
-                        if not device.ble_connected:
-                            device.ble_disconnection_counter += 1
-                        else:
-                            device.ble_disconnection_counter = 0
-                        display.update_BT_number(device.ble_disconnection_counter)
+            await asyncio.sleep(0.02)
 
-                        # Stable buffers
-                        device.stable_azimuth_buffer.append(device.readings.azimuth)
-                        device.stable_inclination_buffer.append(device.readings.inclination)
-                        device.stable_distance_buffer.append(device.readings.distance)
-                        if len(device.stable_azimuth_buffer) > 3:
-                            device.stable_azimuth_buffer.pop(0)
-                            device.stable_inclination_buffer.pop(0)
-                            device.stable_distance_buffer.pop(0)
-
-                        # Trigger buzzer if last 3 stable readings consistent
-                        if len(device.stable_azimuth_buffer) == 3:
-                            if all(abs(device.stable_azimuth_buffer[0]-v)<CONFIG.leg_angle_tolerance for v in device.stable_azimuth_buffer):
-                                for _ in range(3):
-                                    sensor_manager.set_buzzer(True)
-                                    disco_mode.set_white()
-                                    await asyncio.sleep(0.1)
-                                    disco_mode.turn_off()
-                                device.stable_azimuth_buffer.clear()
-                                device.stable_inclination_buffer.clear()
-                                device.stable_distance_buffer.clear()
-
-                        device.measurement_taken = True
-
-                    display.update_sensor_readings(device.readings.distance, device.readings.azimuth, device.readings.inclination)
-                    disco_mode.turn_off()
-                    device.current_disco_color = None
-                    device.current_state = SystemState.IDLE
+        except Exception as e:
+            print(f"[ERROR] sensor_read_display_update main loop exception: {type(e).__name__}: {e}")
+            await asyncio.sleep(0.1)
 
 
 async def watch_for_button_presses():
@@ -243,7 +266,6 @@ async def watch_for_button_presses():
         # Button logic
         if button_manager.was_pressed("Button 1"):
             device.last_activity_time = time.monotonic()
-            print(device.laser_enabled)
             if device.laser_enabled:
                 device.current_state = SystemState.TAKING_MEASURMENT
                 device.measurement_taken = False
@@ -374,6 +396,7 @@ async def auto_switch_off_timeount():
         if now - device.last_activity_time > CONFIG.auto_shutdown_timeout:
             try:
                 print("Inactivity timeout, shutting down device")
+                pwr_pin.value = True  # sets A1 high
                 #insert shutdown code
             except Exception as e:
                 print(f"Error shutting down device: {e}")
