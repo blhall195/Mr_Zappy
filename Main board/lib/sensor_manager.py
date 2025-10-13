@@ -10,13 +10,6 @@ from collections import deque
 
 class SensorManager:
     def __init__(self):
-        # Enable laser power
-        self.laser_power = digitalio.DigitalInOut(board.A2)
-        self.laser_power.switch_to_output(False)
-        time.sleep(0.3)
-        self.laser_power.switch_to_output(True)
-        time.sleep(0.9)
-
         # Initialize laser over UART
         self.uart = busio.UART(board.TX, board.RX, baudrate=9600)
         self.laser = Laser(self.uart)
