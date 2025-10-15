@@ -84,10 +84,10 @@ def set_accuracy(level):
 
     # Map levels to values
     level_map = {
-        "Low":    {"stability_tolerance": "0.5", "stability_buffer_length": 4, "EMA_alpha": "0.8"},
-        "Medium": {"stability_tolerance": "0.25", "stability_buffer_length": 6, "EMA_alpha": "0.5"},
-        "High":   {"stability_tolerance": "0.1", "stability_buffer_length": 8, "EMA_alpha": "0.2"},
-        "Ultra":  {"stability_tolerance": "0.05", "stability_buffer_length": 10, "EMA_alpha": "0.1"},
+        "Low":    {"stability_tolerance": "0.5", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
+        "Medium": {"stability_tolerance": "0.25", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
+        "High":   {"stability_tolerance": "0.1", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
+        "Ultra":  {"stability_tolerance": "0.05", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
     }
 
     if level not in level_map:

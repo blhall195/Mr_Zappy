@@ -54,6 +54,12 @@ class DiscoMode:
         self.pixels.fill(self._apply_brightness(0, 0, 225))
         self.pixels.show()
 
+    def set_purple(self):
+        """Set LED to purple."""
+        self._stop_disco()
+        self.pixels.fill(self._apply_brightness(255, 0, 255))
+        self.pixels.show()
+
     def set_white(self):
         """Set LED to red."""
         self._stop_disco()
