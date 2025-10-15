@@ -78,6 +78,7 @@ class DeviceContext:
         self.ble_connected = False
         self.ble_disconnection_counter = 0
         self.last_activity_time = time.monotonic()
+        self.purple_latched = False
 
         # Buffers for stability checking
         self.azimuth_buffer = []
@@ -177,15 +178,22 @@ async def handle_success():
             device.stable_distance_buffer.pop(0)
 
         if len(device.stable_azimuth_buffer) == 3:
-            if all(abs(device.stable_azimuth_buffer[0]-v)<CONFIG.leg_angle_tolerance for v in device.stable_azimuth_buffer):
+            if all(abs(device.stable_azimuth_buffer[0] - v) < CONFIG.leg_angle_tolerance for v in device.stable_azimuth_buffer):
                 for _ in range(3):
                     sensor_manager.set_buzzer(True)
                     disco_mode.set_white()
                     await asyncio.sleep(0.1)
                     disco_mode.turn_off()
+
+                # Clear buffers
                 device.stable_azimuth_buffer.clear()
                 device.stable_inclination_buffer.clear()
                 device.stable_distance_buffer.clear()
+
+                # Latch purple mode
+                disco_mode.set_purple()
+                device.purple_latched = True
+                device.current_disco_color = "purple"
 
         device.measurement_taken = True
     except Exception as e:
@@ -199,7 +207,12 @@ async def sensor_read_display_update():
                 await asyncio.sleep(0.2)
                 continue
 
-            if device.current_state != SystemState.TAKING_MEASURMENT or device.measurement_taken:
+            # remove purple_latched reset here
+            if device.current_state != SystemState.TAKING_MEASURMENT:
+                await asyncio.sleep(0.05)
+                continue
+
+            if device.measurement_taken:
                 await asyncio.sleep(0.05)
                 continue
 
@@ -207,11 +220,12 @@ async def sensor_read_display_update():
                 sensor_manager.set_buzzer(True)
                 sensor_manager.set_buzzer(False)
                 device.buzzer_enabled = True
+            print(f"DEBUG: state={device.current_state}, purple={device.purple_latched}, taken={device.measurement_taken}")
 
-            if device.current_disco_color != "red":
-                device.current_disco_color = "red"
-                disco_mode.set_red()
-
+            if not device.purple_latched:
+                if device.current_disco_color != "red":
+                    device.current_disco_color = "red"
+                    disco_mode.set_red()
 
             if not device.laser_enabled:
                 sensor_manager.set_laser(True)
@@ -246,9 +260,11 @@ async def sensor_read_display_update():
                     await handle_success()
 
                 display.update_sensor_readings(device.readings.distance, device.readings.azimuth, device.readings.inclination)
-                disco_mode.turn_off()
-                device.current_disco_color = None
+                if not device.purple_latched:
+                    disco_mode.turn_off()
+                    device.current_disco_color = None
                 device.current_state = SystemState.IDLE
+
 
             await asyncio.sleep(0.02)
 
@@ -265,6 +281,7 @@ async def watch_for_button_presses():
         button_manager.update()
         # Button logic
         if button_manager.was_pressed("Button 1"):
+            device.purple_latched = False
             device.last_activity_time = time.monotonic()
             if device.laser_enabled:
                 device.current_state = SystemState.TAKING_MEASURMENT
