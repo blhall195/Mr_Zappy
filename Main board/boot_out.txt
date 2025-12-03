@@ -1,4 +1,4 @@
 Adafruit CircuitPython 9.2.9 on 2025-09-07; Adafruit Feather M4 CAN with same51j19a
 Board ID:feather_m4_can
-UID:A551CD9948364C53202020542A2B0DFF
+UID:A468AD8543394C5320202046313C0CFF
 boot.py output:

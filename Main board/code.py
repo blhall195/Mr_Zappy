@@ -136,6 +136,70 @@ def ema_stable_update(new_az, new_inc):
 
     return stable, smoothed_az, smoothed_inc
 
+
+#  TOLERANCE CHECK HELPERS
+def circular_diff(a, b):
+    return abs((a - b + 180) % 360 - 180)
+
+def bearings_within_tol(values, tol):
+    if len(values) != 3:
+        return False
+    for i in range(3):
+        for j in range(i + 1, 3):
+            if circular_diff(values[i], values[j]) > tol:
+                return False
+    return True
+
+def linear_within_tol(values, tol):
+    if len(values) != 3:
+        return False
+    for i in range(3):
+        for j in range(i + 1, 3):
+            if abs(values[i] - values[j]) > tol:
+                return False
+    return True
+
+def update_buffer(buf, value):
+    buf.append(value)
+    if len(buf) > 3:
+        buf.pop(0)
+
+def save_reading_to_file(az, inc, dist):
+    try:
+        with open("/pending_readings.txt", "a") as f:
+            f.write(f"{az},{inc},{dist}\n")
+    except Exception as e:
+        print("File write error:", e)
+
+async def flush_file_to_ble(ble):
+    try:
+        with open("/pending_readings.txt", "r") as f:
+            for line in f:
+                az, inc, dist = line.strip().split(",")
+                ble.send_message(float(az), float(inc), float(dist))
+                await asyncio.sleep(0.05)  # yields properly
+    except OSError:
+        return
+
+    await asyncio.sleep(0.2)
+
+    try:
+        os.remove("/pending_readings.txt")
+    except Exception as e:
+        print("Failed to delete pending file:", e)
+
+def count_pending_readings():
+    try:
+        with open("/pending_readings.txt", "r") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
+
+pending = count_pending_readings()
+device.ble_disconnection_counter = pending
+display.update_BT_number(pending)
+
+# ===== Async Functions =====
 async def alert_error(err_code, flashes=4):
     try:
         device.readings.distance = err_code
@@ -163,29 +227,54 @@ async def handle_success():
         sensor_manager.set_laser(True)
         device.buzzer_enabled = False
 
-        ble.send_message(device.readings.azimuth, device.readings.inclination, device.readings.distance)
+        if device.ble_connected:
+            ble.send_message(device.readings.azimuth, device.readings.inclination, device.readings.distance)
+            device.ble_disconnection_counter = 0
+        else:
+            device.ble_disconnection_counter += 1
+            display.update_BT_number(device.ble_disconnection_counter)
+            save_reading_to_file(device.readings.azimuth,
+                                 device.readings.inclination,
+                                 device.readings.distance)
 
-        device.ble_disconnection_counter = 0 if device.ble_connected else device.ble_disconnection_counter + 1
-        display.update_BT_number(device.ble_disconnection_counter)
 
-        device.stable_azimuth_buffer.append(device.readings.azimuth)
-        device.stable_inclination_buffer.append(device.readings.inclination)
-        device.stable_distance_buffer.append(device.readings.distance)
+        update_buffer(device.stable_azimuth_buffer, device.readings.azimuth)
+        update_buffer(device.stable_inclination_buffer, device.readings.inclination)
+        update_buffer(device.stable_distance_buffer, device.readings.distance)
 
-        if len(device.stable_azimuth_buffer) > 3:
-            device.stable_azimuth_buffer.pop(0)
-            device.stable_inclination_buffer.pop(0)
-            device.stable_distance_buffer.pop(0)
+        # Only evaluate if we *actually* have 3 samples per channel
+        if (len(device.stable_azimuth_buffer) == 3 and
+            len(device.stable_inclination_buffer) == 3 and
+            len(device.stable_distance_buffer) == 3):
 
-        if len(device.stable_azimuth_buffer) == 3:
-            if all(abs(device.stable_azimuth_buffer[0] - v) < CONFIG.leg_angle_tolerance for v in device.stable_azimuth_buffer):
+            az_ok = bearings_within_tol(
+                device.stable_azimuth_buffer,
+                CONFIG.leg_angle_tolerance
+            )
+
+            inc_ok = linear_within_tol(
+                device.stable_inclination_buffer,
+                CONFIG.leg_angle_tolerance
+            )
+
+            dist_ok = linear_within_tol(
+                device.stable_distance_buffer,
+                CONFIG.leg_distance_tolerance
+            )
+
+
+            # All three must be stable
+            if az_ok and inc_ok and dist_ok:
+
+                # Buzz + flash 3×
                 for _ in range(3):
                     sensor_manager.set_buzzer(True)
                     disco_mode.set_white()
                     await asyncio.sleep(0.1)
+                    sensor_manager.set_buzzer(False)
                     disco_mode.turn_off()
 
-                # Clear buffers
+                # Clear buffers for next leg
                 device.stable_azimuth_buffer.clear()
                 device.stable_inclination_buffer.clear()
                 device.stable_distance_buffer.clear()
@@ -195,7 +284,10 @@ async def handle_success():
                 device.purple_latched = True
                 device.current_disco_color = "purple"
 
-        device.measurement_taken = True
+                device.measurement_taken = True
+                return
+
+        device.measurement_taken = False
     except Exception as e:
         print(f"[ERROR] handle_success exception: {type(e).__name__}: {e}")
 
@@ -355,6 +447,9 @@ async def monitor_ble_pin():
             device.ble_connected = current_value
             display.update_BT_label(current_value)
             last_value = current_value
+            if device.ble_connected:
+                display.update_BT_number(0)
+                await flush_file_to_ble(ble)
         await asyncio.sleep(0.3)
 
 
@@ -374,6 +469,7 @@ async def monitor_ble_uart():
 
             if cmd == 0x55:  # ACK0
                 print("✅ ACK0 received")
+                device.ble_disconnection_counter
             elif cmd == 0x56:  # ACK1
                 print("✅ ACK1 received")
             elif cmd == 0x31:  # START_CAL
@@ -404,8 +500,6 @@ async def monitor_ble_uart():
             await asyncio.sleep(0.1)  # longer delay during measurement
         else:
             await asyncio.sleep(0.01)  # very short delay otherwise
-
-
 
 async def auto_switch_off_timeount():
     while True:
