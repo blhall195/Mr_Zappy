@@ -70,7 +70,7 @@ class PerformCalibration:
             if len(grav_buffer) > 5: grav_buffer.pop(0)
 
             if waiting_for_stable_sample and len(mag_buffer) == 5 and len(grav_buffer) == 5:
-                if self._is_consistent(mag_buffer, 0.2) and self._is_consistent(grav_buffer, 0.2):
+                if self._is_consistent(mag_buffer, 0.1) and self._is_consistent(grav_buffer, 0.1):
                     disco_mode.set_green()
 
                     avg_mag = tuple(sum(axis_vals) / 5 for axis_vals in zip(*mag_buffer))
@@ -122,7 +122,7 @@ class PerformCalibration:
             if len(grav_buffer) > 5: grav_buffer.pop(0)
 
             if waiting_for_stable_sample and len(mag_buffer) == 5 and len(grav_buffer) == 5:
-                if self._is_consistent(mag_buffer, 0.2) and self._is_consistent(grav_buffer, 0.2):
+                if self._is_consistent(mag_buffer, 0.1) and self._is_consistent(grav_buffer, 0.1):
                     disco_mode.set_green()
 
                     avg_mag = tuple(sum(axis_vals) / 5 for axis_vals in zip(*mag_buffer))

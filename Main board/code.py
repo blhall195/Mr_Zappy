@@ -77,6 +77,7 @@ class DeviceContext:
         self.current_disco_color = None
         self.ble_connected = False
         self.ble_disconnection_counter = 0
+        self.ble_readings_transfered_flag = False
         self.last_activity_time = time.monotonic()
         self.purple_latched = False
 
@@ -106,6 +107,8 @@ def update_readings():
     try:
         mag = sensor_manager.get_mag()
         grav = sensor_manager.get_grav()
+        calibrated_readings = angles = device.readings.calib_updated.get_calibrated(mag, grav)
+        print(calibrated_readings)
         angles = device.readings.calib_updated.get_angles(mag, grav)
         device.readings.azimuth, device.readings.inclination, device.readings.roll = angles
     except Exception as e:
@@ -440,16 +443,26 @@ async def check_battery_sensor():
 
 
 async def monitor_ble_pin():
-    last_value = None
+    last_connected = False
+
     while True:
-        current_value = ble_status_pin.value
-        if current_value != last_value:
-            device.ble_connected = current_value
-            display.update_BT_label(current_value)
-            last_value = current_value
-            if device.ble_connected:
+        current_connected = ble_status_pin.value
+        device.ble_connected = current_connected
+        # Flush once upon new connection
+        if current_connected and not last_connected:
+            # Set the flag to False to indicate "transfer in progress"
+            device.ble_readings_transfered_flag = False
+            await flush_file_to_ble(ble)
+        # Update BT symbol
+        display.update_BT_label(current_connected)
+        # Update transfer indicator
+        if current_connected:
+            if device.ble_readings_transfered_flag:
                 display.update_BT_number(0)
-                await flush_file_to_ble(ble)
+                device.ble_disconnection_counter = 0
+            else:
+                display.update_BT_number("...")
+        last_connected = current_connected
         await asyncio.sleep(0.3)
 
 
@@ -466,12 +479,12 @@ async def monitor_ble_uart():
                 print(f"❌ Invalid command format: {msg}")
                 await asyncio.sleep(0.01)
                 continue
-
             if cmd == 0x55:  # ACK0
                 print("✅ ACK0 received")
-                device.ble_disconnection_counter
+                device.ble_readings_transfered_flag = True
             elif cmd == 0x56:  # ACK1
                 print("✅ ACK1 received")
+                device.ble_readings_transfered_flag = True
             elif cmd == 0x31:  # START_CAL
                 print("⚙️ START_CAL received")
                 device.current_state = SystemState.MENU

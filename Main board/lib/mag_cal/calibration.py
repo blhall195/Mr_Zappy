@@ -157,6 +157,11 @@ class Calibration:
         self.set_field_characteristics(mag_data, grav_data)
         return np.mean(self.uniformity(mag_data, grav_data))
 
+    def get_calibrated(self, mag, grav):
+        mag_calibrated = normalise(self.mag.apply(mag))
+        grav_calibrated = normalise(self.grav.apply(grav))
+        return mag_calibrated, grav_calibrated
+
     def get_angles(self, mag, grav) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Get device azimuth(bearing), inclination, and roll, given the magnetic and gravity readings
