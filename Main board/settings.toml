@@ -8,7 +8,7 @@
 mag = "10.0" #degrees
 grav = "10.0" #degrees
 dip = "10.0" #degrees
-anomaly_detection = "False"
+anomaly_detection = "True"
 
 
 # -------------------------------
@@ -34,11 +34,9 @@ leg_distance_tolerance = "0.05" #m - same as default setting on sexytopo
 # -------------------------------
 # Stability Settings (Set while taking a reading)
 # -------------------------------
-#accuracy this is just a status for the menu, it doesn't actually do anything
-accuracy = "Low"
 
 # Tolerance for sensor noise(°). Lower = more accurate readings but slower to stabilize.
-stability_tolerance = "0.5"
+stability_tolerance = "0.4"
 
 # Number of consecutive readings to check for stability. Lower = faster readings, less stable.
 stability_buffer_length = 3

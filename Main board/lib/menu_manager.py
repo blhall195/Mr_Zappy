@@ -1,4 +1,6 @@
 import os
+import warnings
+warnings.simplefilter('ignore')
 
 # Delete old menu mode flag if present
 if "menu_mode.txt" in os.listdir("/"):
@@ -76,57 +78,20 @@ def anomaly_detection(value):
     build_submenus(menu, menu_structure)
     menu.show_menu()
 
+# --- Delete pending readings ---
+def delete_pending_readings():
+    file_path = "pending_readings.txt"
+    if file_path in os.listdir("/"):
+        try:
+            os.remove(file_path)
+            print(f"{file_path} deleted.")
+        except OSError as e:
+            print(f"Failed to delete {file_path}: {e}")
+    else:
+        print(f"{file_path} does not exist.")
 
-
-def set_accuracy(level):
-    global accuracy, menu
-    accuracy = level
-
-    # Map levels to values
-    level_map = {
-        "Low":    {"stability_tolerance": "0.5", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
-        "Medium": {"stability_tolerance": "0.25", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
-        "High":   {"stability_tolerance": "0.1", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
-        "Ultra":  {"stability_tolerance": "0.05", "stability_buffer_length": 3, "EMA_alpha": "0.5"},
-    }
-
-    if level not in level_map:
-        print(f"Unknown accuracy level: {level}")
-        return
-
-    updates = level_map[level]
-    updates["accuracy"] = level  # also update the accuracy key itself
-
-    try:
-        # Read existing file
-        with open(SETTINGS_FILE, "r") as f:
-            lines = f.readlines()
-
-        # Write updated file
-        with open(SETTINGS_FILE, "w") as f:
-            for line in lines:
-                stripped = line.strip()
-                for key, value in updates.items():
-                    if stripped.startswith(key):
-                        # Quote only if value is a string
-                        if isinstance(value, str):
-                            f.write(f'{key} = "{value}"\n')
-                        else:
-                            f.write(f"{key} = {value}\n")
-                        break
-                else:
-                    f.write(line)  # keep other lines unchanged
-
-        print(f"Accuracy updated to '{level}' in {SETTINGS_FILE}")
-
-    except Exception as e:
-        print(f"Error updating settings file: {e}")
-
-    # Rebuild menu to reflect new value
-    menu = Menu(display, height=128, width=128, title="Main Menu")
-    menu_structure = get_menu_structure()
-    build_submenus(menu, menu_structure)
-    menu.show_menu()
+    # Go back to root menu
+    go_to_root()
 
 
 
@@ -193,6 +158,24 @@ def set_auto_shutdown_timeout(value):
     build_submenus(menu, menu_structure)
     menu.show_menu()
 
+def update_display(menu_obj):
+    """
+    Update the display to show the given menu object.
+    Handles both show_menu() and build_displayio_group() cases.
+    """
+    if hasattr(menu_obj, "show_menu"):
+        menu_obj.show_menu()
+    elif hasattr(menu_obj, "build_displayio_group"):
+        display.root_group = menu_obj.build_displayio_group()
+
+def go_to_root():
+    # walk up to root menu
+    m = menu
+    while getattr(m, "_activated_submenu", None):
+        m._activated_submenu = None
+        m = m._activated_submenu if m._activated_submenu else m
+    m.show_menu()
+
 
 def exit_menu():
     microcontroller.reset()
@@ -200,17 +183,17 @@ def exit_menu():
 # ---Create Menu structure---
 def get_menu_structure():
     return [
-        ("Save_readings", save_readings),
-        ("Enter Calibration", enter_calibration_mode),
+        ("Enter Calibration", [
+            ("No", lambda: go_to_root()),  # Go back to main menu
+            ("Yes", enter_calibration_mode),
+        ]),
         ("Anomoly Detec: " + ("On" if anomaly_detection_bool else "Off"), [
             ("On", lambda: anomaly_detection("True")),
             ("Off", lambda: anomaly_detection("False")),
         ]),
-        ("Accuracy: " + (accuracy), [
-            ("Low", lambda: set_accuracy("Low")),
-            ("Medium", lambda: set_accuracy("Medium")),
-            ("High", lambda: set_accuracy("High")),
-            ("Ultra", lambda: set_accuracy("Ultra")),
+        ("Delete saved shots", [
+            ("No", lambda: go_to_root()),  # Go back to main menu
+            ("Yes DELETE them", delete_pending_readings),
         ]),
         ("Laser off: " + (str(laser_timeout//60) + " min" if laser_timeout >= 61 else str(laser_timeout) + " Sec"), [
             ("30 sec", lambda: set_laser_timeout(30)),

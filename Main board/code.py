@@ -137,6 +137,8 @@ def ema_stable_update(new_az, new_inc):
     inc_diff = max(device.inclination_buffer) - min(device.inclination_buffer)
     stable = az_diff < CONFIG.stability_tolerance and inc_diff < CONFIG.stability_tolerance
 
+    #print(az_diff,)
+
     return stable, smoothed_az, smoothed_inc
 
 
