@@ -1,3 +1,5 @@
+import warnings
+warnings.simplefilter('ignore')
 import time
 import board
 import busio

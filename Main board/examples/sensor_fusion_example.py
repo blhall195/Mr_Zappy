@@ -1,98 +1,138 @@
-# Write your code here :-)
-from sensor_manager import SensorManager
 import time
 import math
 import json
+from sensor_manager import SensorManager
 from mag_cal.calibration import Calibration
 
-# === Load Calibration ===
-calib = Calibration()
+# ============================
+# Load Calibration
+# ============================
 with open("/calibration_dict.json", "r") as file:
     calibration_dict = json.load(file)
-calib = calib.from_dict(calibration_dict)
 
+calib = Calibration().from_dict(calibration_dict)
 print("Calibration data loaded.")
 
-# === Create Sensor Manager ===
+# ============================
+# Setup
+# ============================
+
+def measure_gyro_bias(sensor, samples=200, delay=0.002):
+    bx = by = bz = 0.0
+    get_gyro = sensor.get_gyro
+
+    for _ in range(samples):
+        gx, gy, gz = get_gyro()
+        bx += gx
+        by += gy
+        bz += gz
+        time.sleep(delay)
+
+    return [bx / samples, by / samples, bz / samples]
+
 sensor = SensorManager()
 
-# === Complementary filter alpha ===
-ALPHA = 0.98
+print("Measuring gyro bias...")
+gyro_bias = measure_gyro_bias(sensor)
+print("Gyro bias:", gyro_bias)
 
-# === Initial filtered angles ===
+GYRO_BIAS_X, GYRO_BIAS_Y, GYRO_BIAS_Z = gyro_bias
+
+# ============================
+# Parameters
+# ============================
+
+ALPHA = 0.90            # more responsive
+MAG_UPDATE_INTERVAL = 0.3
+
 fused_pitch = 0.0
 fused_roll = 0.0
-fused_yaw = 0.0  # From gyro integration
-mag_yaw = 0.0    # Independent yaw from magnetometer
+fused_yaw = 0.0
+mag_yaw = 0.0
 
-# === Rolling average buffer for mag yaw ===
 mag_yaw_window = []
-
-# === Timing setup ===
 last_time = time.monotonic()
-last_mag_update = 0
-MAG_UPDATE_INTERVAL = 0.1  # seconds
-
-# === Accelerometer-only pitch/roll helper ===
-def get_pitch_roll_from_accel(accel):
-    ax, ay, az = accel
-    try:
-        pitch = math.atan2(-ax, math.sqrt(ay * ay + az * az)) * 180 / math.pi
-        roll = math.atan2(ay, az) * 180 / math.pi
-    except ZeroDivisionError:
-        pitch = 0.0
-        roll = 0.0
-    return pitch, roll
+last_mag_update = last_time
 
 print_counter = 0
 
-# === Main loop ===
+# ============================
+# Bind functions locally
+# ============================
+get_grav = sensor.get_grav
+get_mag = sensor.get_mag
+get_gyro = sensor.get_gyro
+get_cgrav = calib.get_calibrated_grav
+get_cmag = calib.get_calibrated_mag
+get_angles = calib.get_angles
+
+# ============================
+# Accelerometer → pitch/roll
+# ============================
+def accel_to_pitch_roll(acc):
+    ax, ay, az = acc
+    try:
+        pitch = math.degrees(math.atan2(-ax, math.sqrt(ay*ay + az*az)))
+        roll  = math.degrees(math.atan2(ay, az))
+    except ZeroDivisionError:
+        return 0.0, 0.0
+    return pitch, roll
+
+# ============================
+# Main loop
+# ============================
 while True:
-    # --- Time delta ---
-    current_time = time.monotonic()
-    dt = current_time - last_time
-    last_time = current_time
 
-    # --- Read sensors ---
-    gyro = sensor.get_gyro()       # (gx, gy, gz) in deg/sec
-    accel = sensor.get_accel()     # (ax, ay, az)
+    # Δt
+    now = time.monotonic()
+    dt = now - last_time
+    last_time = now
 
-    gx, gy, gz = gyro
+    # RAW readings
+    accel_raw = get_grav()
+    mag_raw   = get_mag()
+    gx, gy, gz = get_gyro()
 
-    # --- Integrate gyro rates to update orientation ---
+    # Apply bias
+    gx -= GYRO_BIAS_X
+    gy -= GYRO_BIAS_Y
+    gz -= GYRO_BIAS_Z
+
+    # CALIBRATED readings
+    accel = get_cgrav(accel_raw)
+    mag   = get_cmag(mag_raw)
+
+    # Gyro integration
     fused_pitch += gx * dt
     fused_roll  += gy * dt
-    fused_yaw   += gz * dt
-    fused_yaw %= 360  # Keep in 0–360 range
+    fused_yaw   = (fused_yaw + gz * dt) % 360
 
-    # --- Get pitch and roll from accelerometer only ---
-    accel_pitch, accel_roll = get_pitch_roll_from_accel(accel)
-
-    # --- Apply complementary filter for pitch & roll ---
+    # Complementary filter (pitch/roll)
+    accel_pitch, accel_roll = accel_to_pitch_roll(accel)
     fused_pitch = ALPHA * fused_pitch + (1 - ALPHA) * accel_pitch
     fused_roll  = ALPHA * fused_roll  + (1 - ALPHA) * accel_roll
 
-    # --- Read magnetometer occasionally for independent azimuth ---
-    if (current_time - last_mag_update) >= MAG_UPDATE_INTERVAL:
-        mag = sensor.get_mag()  # (mx, my, mz)
-        new_mag_yaw, _, _ = calib.get_angles(mag, accel)  # Only compute mag-based yaw
-        new_mag_yaw %= 360
+    # Magnetometer yaw (slow, non-blocking)
+    if now - last_mag_update >= MAG_UPDATE_INTERVAL:
+        try:
+            mag_yaw_update, _, _ = get_angles(mag, accel)
+            mag_yaw_update %= 360
 
-        # --- Rolling average logic ---
-        mag_yaw_window.append(new_mag_yaw)
-        if len(mag_yaw_window) > 3:
-            mag_yaw_window.pop(0)
-        mag_yaw = sum(mag_yaw_window) / len(mag_yaw_window)
+            mag_yaw_window.append(mag_yaw_update)
+            if len(mag_yaw_window) > 3:
+                mag_yaw_window.pop(0)
 
-        last_mag_update = current_time
+            mag_yaw = sum(mag_yaw_window) / len(mag_yaw_window)
+        except Exception:
+            pass
 
-    # --- Print every 10 cycles (~0.5 seconds if running at 2 kHz) ---
+        last_mag_update = now
+
+    # Output
     print_counter += 1
     if print_counter >= 10:
         print((fused_pitch,))
-        # To show filtered mag yaw, uncomment:
-        #print((mag_yaw,))
-
         print_counter = 0
 
-    time.sleep(0.0001)  # 2000 Hz loop (adjust as needed)
+    # Zero-cost yield
+    time.sleep(0)

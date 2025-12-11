@@ -1,3 +1,6 @@
+import warnings
+warnings.simplefilter('ignore')
+
 import asyncio
 import os
 import json
