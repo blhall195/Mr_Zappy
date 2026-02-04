@@ -28,6 +28,11 @@ if "calibration_mode.txt" in os.listdir("/"):
     except OSError as e:
         print("Error deleting file:", e)
 
+# Setup power pin for LTC2952 shutdown
+pwr_pin = digitalio.DigitalInOut(board.A2)
+pwr_pin.direction = digitalio.Direction.OUTPUT
+pwr_pin.value = True  # Keep power on
+
 # Initialize all components
 sensor_manager = SensorManager()
 sensor_manager.set_laser(True)
@@ -89,7 +94,7 @@ async def monitor_ble_uart(ble_manager, device, sensor_manager):
         await asyncio.sleep(0.01)
 
 # Activity timeout / power management
-last_activity_time = 0
+last_activity_time = time.monotonic()
 ACTIVITY_TIMEOUT = 2700  # 45 min
 
 def signal_activity():
@@ -103,14 +108,14 @@ async def send_keep_alive_periodically(ble_manager):
         if now - last_activity_time > ACTIVITY_TIMEOUT:
             try:
                 print("Shutting Down (timeout)")
-                # INSERT shutdown command here for your power IC
+                pwr_pin.value = False
             except Exception as e:
                 print(f"Error sending keep-alive: {e}")
         await asyncio.sleep(5)
 
 # MAIN
 async def main():
-    calibration = PerformCalibration(sensor_manager, button_manager, calib)
+    calibration = PerformCalibration(sensor_manager, button_manager, calib, pwr_pin)
 
     # Background tasks
     asyncio.create_task(monitor_ble_uart(ble, device, sensor_manager))
