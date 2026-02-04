@@ -10,11 +10,17 @@ if "menu_mode.txt" in os.listdir("/"):
         print("Error deleting file:", e)
 
 import board
+import digitalio
 import displayio
 import microcontroller
 from adafruit_displayio_sh1107 import SH1107, DISPLAY_OFFSET_ADAFRUIT_128x128_OLED_5297
 from fruity_menu.Menu import Menu
 import time
+
+# Setup power pin for LTC2952 shutdown
+pwr_pin = digitalio.DigitalInOut(board.A2)
+pwr_pin.direction = digitalio.Direction.OUTPUT
+pwr_pin.value = True  # Keep power on
 
 #Import config settings
 from config import Config
@@ -30,6 +36,7 @@ laser_timeout = CONFIG.laser_timeout
 auto_shutdown_timeout = CONFIG.auto_shutdown_timeout
 accuracy = CONFIG.accuracy
 anomaly_detection_bool = CONFIG.anomaly_detection
+last_activity_time = time.monotonic()
 
 
 
@@ -252,7 +259,6 @@ menu.show_menu()
 
 
 
-
 # --- Main loop ---
 while True:
     buttons.update()
@@ -260,6 +266,7 @@ while True:
 
     # Scroll up
     if buttons.was_pressed("Button 1") and hasattr(m, "scroll"):
+        last_activity_time = time.monotonic()
         m.scroll(-1)
         if hasattr(m, "show_menu"):
             m.show_menu()
@@ -268,6 +275,7 @@ while True:
 
     # Scroll down
     if buttons.was_pressed("Button 2") and hasattr(m, "scroll"):
+        last_activity_time = time.monotonic()
         m.scroll(1)
         if hasattr(m, "show_menu"):
             m.show_menu()
@@ -276,11 +284,21 @@ while True:
 
     # Click / select
     if buttons.was_pressed("Button 3"):
+        last_activity_time = time.monotonic()
         m.click()
         m = active_menu(menu)
         if hasattr(m, "show_menu"):
             m.show_menu()
         elif hasattr(m, "build_displayio_group"):
             display.root_group = m.build_displayio_group()
+
+    # Auto shutdown timeout
+    if time.monotonic() - last_activity_time > auto_shutdown_timeout:
+        print("Inactivity timeout, shutting down device")
+        pwr_pin.value = False
+
+    # Power off (Button 4)
+    if buttons.was_pressed("Button 4"):
+        pwr_pin.value = False
 
     time.sleep(0.01)

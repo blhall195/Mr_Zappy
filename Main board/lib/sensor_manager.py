@@ -89,3 +89,17 @@ class SensorManager:
     def get_bat(self):
         """Get the current battery percentage."""
         return self.max17.cell_percent
+
+    def reset_laser(self):
+        """Reset the laser sensor to clear any error state."""
+        try:
+            # Turn off laser
+            self.laser.set_laser(False)
+            time.sleep(0.1)
+            # Flush UART buffer
+            self.uart.reset_input_buffer()
+            # Turn laser back on
+            self.laser.set_laser(True)
+            time.sleep(0.2)  # Give it time to stabilize
+        except Exception as e:
+            print(f"Error resetting laser: {e}")

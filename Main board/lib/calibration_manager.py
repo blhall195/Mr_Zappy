@@ -32,10 +32,11 @@ class CalibrationFlags:
             self.loaded_modules.append("menu_manager")
 
 class PerformCalibration:
-    def __init__(self, sensor_manager, button_manager, calib):
+    def __init__(self, sensor_manager, button_manager, calib, pwr_pin=None):
         self.calib = calib
         self.sensor_manager = sensor_manager
         self.button_manager = button_manager
+        self.pwr_pin = pwr_pin
         self.mag_array = []
         self.grav_array = []
 
@@ -63,6 +64,8 @@ class PerformCalibration:
             if button_mgr.was_pressed("Button 1") and not waiting_for_stable_sample:
                 waiting_for_stable_sample = True
                 disco_mode.set_red()
+            if button_mgr.was_pressed("Button 4") and self.pwr_pin is not None:
+                self.pwr_pin.value = False
 
             mag_data = sensor_mgr.get_mag()
             grav_data = sensor_mgr.get_grav()
@@ -115,6 +118,8 @@ class PerformCalibration:
             if button_mgr.was_pressed("Button 1") and not waiting_for_stable_sample:
                 waiting_for_stable_sample = True
                 disco_mode.set_red()
+            if button_mgr.was_pressed("Button 4") and self.pwr_pin is not None:
+                self.pwr_pin.value = False
 
             mag_data = sensor_mgr.get_mag()
             grav_data = sensor_mgr.get_grav()
@@ -172,6 +177,8 @@ class PerformCalibration:
             elif self.button_manager.was_pressed("Button 2"):
                 await self.collect_alignment_data(disco_mode)
                 break  # Should not be reached due to reset
+            elif self.button_manager.was_pressed("Button 4") and self.pwr_pin is not None:
+                self.pwr_pin.value = False
 
             await asyncio.sleep(0.01)
 
