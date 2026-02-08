@@ -35,6 +35,7 @@ from disco_manager import DiscoMode
 import json
 import microcontroller
 from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError, Strictness
+from laser_egismos import LaserError
 from config import Config
 
 CONFIG = Config()
@@ -44,6 +45,7 @@ sensor_manager.set_laser(True)
 sensor_manager.set_buzzer(True)
 button_manager = ButtonManager()
 ble = BleManager()
+ble.set_name("SAP6_Unicorn")
 disco_mode = DiscoMode(sensor_manager, brightness=1)
 time.sleep(0.05)#prevents brownout
 display.display_screen_initialise()
@@ -351,6 +353,11 @@ async def sensor_read_display_update():
                     abbrev = {"MagneticAnomalyError":"MagErr","GravityAnomalyError":"GravErr","DipAnomalyError":"DipErr"}
                     await alert_error(abbrev.get(type(e).__name__, "Err"))
 
+                except LaserError as e:
+                    print(f"[ERROR] Laser error: {type(e).__name__}: {e}")
+                    sensor_manager.reset_laser()
+                    await alert_error("LzrERR")
+
                 except Exception as e:
                     print(f"[ERROR] Distance read failed: {type(e).__name__}: {e}")
                     sensor_manager.reset_laser()
@@ -410,8 +417,11 @@ async def watch_for_button_presses():
                     sensor_manager.set_laser(False)
                     disco_mode.turn_off()
                     device.disco_on = False
+                    import gc
+                    gc.collect()
                     from snake import start_snake_game
                     await start_snake_game(display, button_manager, disco_mode, pwr_pin)
+                    gc.collect()
                     button2_hold_start = None
         else:
             # Button released - check if it was a short press for disco toggle
@@ -485,9 +495,14 @@ async def monitor_ble_pin():
         device.ble_connected = current_connected
         # Flush once upon new connection
         if current_connected and not last_connected:
-            # Set the flag to False to indicate "transfer in progress"
-            device.ble_readings_transfered_flag = False
-            await flush_file_to_ble(ble)
+            if device.ble_disconnection_counter > 0:
+                # Set the flag to False to indicate "transfer in progress"
+                device.ble_readings_transfered_flag = False
+                display.update_BT_number("...")
+                disco_mode.set_blue()
+                await asyncio.sleep(1)  # allow BLE slave to be ready before flushing
+                await flush_file_to_ble(ble)
+                disco_mode.turn_off()
         # Update BT symbol
         display.update_BT_label(current_connected)
         # Update transfer indicator
@@ -496,7 +511,9 @@ async def monitor_ble_pin():
                 display.update_BT_number(0)
                 device.ble_disconnection_counter = 0
             else:
-                display.update_BT_number("...")
+                display.update_BT_number("")
+        else:
+            display.update_BT_number(device.ble_disconnection_counter)
         last_connected = current_connected
         await asyncio.sleep(0.3)
 

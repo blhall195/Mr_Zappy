@@ -12,6 +12,7 @@ from calibration_manager import PerformCalibration
 from mag_cal.calibration import Calibration, MagneticAnomalyError, GravityAnomalyError, DipAnomalyError, Strictness
 from ble_manager import BleManager
 from disco_manager import DiscoMode
+from display_manager import DisplayManager
 
 # Optional patch for roll calibration
 try:
@@ -39,6 +40,7 @@ sensor_manager.set_laser(True)
 button_manager = ButtonManager()
 ble = BleManager()
 disco_mode = DiscoMode(sensor_manager, brightness=1)
+display_manager = DisplayManager()
 calib = Calibration(mag_axes="-X-Y-Z", grav_axes="-Y-X+Z")
 
 # Store readings
@@ -122,6 +124,6 @@ async def main():
     asyncio.create_task(send_keep_alive_periodically(ble))
 
     # User chooses calibration type
-    await calibration.wait_for_calibration_choice(device, disco_mode)
+    await calibration.wait_for_calibration_choice(device, disco_mode, display_manager)
 
 asyncio.run(main())

@@ -1,3 +1,3 @@
 Adafruit CircuitPython 9.2.8 on 2025-05-28; Adafruit ItsyBitsy nRF52840 Express with nRF52840
 Board ID:itsybitsy_nrf52840_express
-UID:C058B9C0E5F8ACEF
+UID:644F2691038DE12B
