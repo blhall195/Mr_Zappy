@@ -8,6 +8,7 @@ import microcontroller
 from config import Config
 CONFIG = Config()
 
+
 class CalibrationFlags:
     """Simple calibration flag loader — identical behavior to flat import logic."""
     def __init__(self):
@@ -40,15 +41,21 @@ class PerformCalibration:
         self.mag_array = []
         self.grav_array = []
 
-    async def collect_ellipsoid_data(self, device, disco_mode):
-        print("Starting ellipsoid   calibration. Take 56 readings in differentdirections.\n")
-        print("")
+    async def collect_ellipsoid_data(self, device, disco_mode, display_manager=None):
+        print("Starting ellipsoid   calibration...")
         self.mag_array.clear()
         self.grav_array.clear()
         sensor_mgr = self.sensor_manager
         button_mgr = self.button_manager
 
         sensor_mgr.set_laser(True)
+
+        # Initialize coverage bar if display_manager provided
+        coverage_bar = None
+        if display_manager:
+            from coverage_bar import CoverageBar
+            coverage_bar = CoverageBar(display_manager.display, display_manager.font)
+            coverage_bar.show()
 
         iteration = 0
         mag_buffer = []
@@ -57,7 +64,7 @@ class PerformCalibration:
 
         while iteration < 56:
             if device.current_state != "CALIBRATING":
-                print("❌ Calibration cancelled during phase 1.")
+                print("Calibration cancelled.")
                 return
 
             button_mgr.update()
@@ -76,7 +83,7 @@ class PerformCalibration:
             if len(grav_buffer) > 5: grav_buffer.pop(0)
 
             if waiting_for_stable_sample and len(mag_buffer) == 5 and len(grav_buffer) == 5:
-                if self._is_consistent(mag_buffer, 0.1) and self._is_consistent(grav_buffer, 0.1):
+                if self._is_consistent(mag_buffer, 0.4) and self._is_consistent(grav_buffer, 0.1):
                     disco_mode.set_green()
 
                     avg_mag = tuple(sum(axis_vals) / 5 for axis_vals in zip(*mag_buffer))
@@ -84,14 +91,22 @@ class PerformCalibration:
 
                     self.mag_array.append(avg_mag)
                     self.grav_array.append(avg_grav)
+
                     iteration += 1
-                    print(f"Calib Point: {iteration}/56")
+
+                    # Update coverage bar with gravity (shows device orientation)
+                    if coverage_bar:
+                        coverage_bar.add_point(*avg_grav)
+                    print(f"{iteration}/56")
+
                     sensor_mgr.set_buzzer(True)
                     await asyncio.sleep(0.2)
                     disco_mode.turn_off()
                     waiting_for_stable_sample = False
 
             await asyncio.sleep(0.002)
+
+        print("Done")
 
         await self._save_data("/ellipsoid_data.json", "ellipsoid")
         self._write_flag("calculate_ellipsoid.txt")
@@ -100,13 +115,27 @@ class PerformCalibration:
         microcontroller.reset()
 
 
-    async def collect_alignment_data(self, disco_mode):
+    async def collect_alignment_data(self, disco_mode, display_manager=None):
         print("\nLaser alignment.     Rotate 8 times on    target. Repeat in 3  different directions.\n")
         self.mag_array.clear()
         self.grav_array.clear()
 
         sensor_mgr = self.sensor_manager
         button_mgr = self.button_manager
+
+        # Initialize display for showing progress
+        stage_label = None
+        progress_label = None
+        if display_manager:
+            import displayio
+            from adafruit_display_text import bitmap_label as label
+
+            splash = displayio.Group()
+            stage_label = label.Label(display_manager.font, text="Stage 1", scale=3, x=1, y=40)
+            progress_label = label.Label(display_manager.font, text="0/8", scale=3, x=35, y=80)
+            splash.append(stage_label)
+            splash.append(progress_label)
+            display_manager.display.root_group = splash
 
         iteration = 0
         mag_buffer = []
@@ -130,7 +159,7 @@ class PerformCalibration:
             if len(grav_buffer) > 5: grav_buffer.pop(0)
 
             if waiting_for_stable_sample and len(mag_buffer) == 5 and len(grav_buffer) == 5:
-                if self._is_consistent(mag_buffer, 0.1) and self._is_consistent(grav_buffer, 0.1):
+                if self._is_consistent(mag_buffer, 0.4) and self._is_consistent(grav_buffer, 0.1):
                     disco_mode.set_green()
 
                     avg_mag = tuple(sum(axis_vals) / 5 for axis_vals in zip(*mag_buffer))
@@ -139,6 +168,14 @@ class PerformCalibration:
                     self.mag_array.append(avg_mag)
                     self.grav_array.append(avg_grav)
                     iteration += 1
+
+                    # Update display with progress
+                    if stage_label and progress_label:
+                        stage = (iteration - 1) // 8 + 1
+                        reading_in_stage = ((iteration - 1) % 8) + 1
+                        stage_label.text = f"Stage {stage}"
+                        progress_label.text = f"{reading_in_stage}/8"
+
                     print(f"Align Point: {iteration}/24")
                     sensor_mgr.set_buzzer(True)
                     await asyncio.sleep(0.2)
@@ -163,7 +200,7 @@ class PerformCalibration:
         await asyncio.sleep(1.5)
         microcontroller.reset()
 
-    async def wait_for_calibration_choice(self, device, disco_mode):
+    async def wait_for_calibration_choice(self, device, disco_mode, display_manager=None):
         print("\nPress Button 1 for   Ellipsoid Calibration")
         print("")
         print("Press Button 2 for   Alignment Calibration\n")
@@ -172,10 +209,10 @@ class PerformCalibration:
             self.button_manager.update()
 
             if self.button_manager.was_pressed("Button 1"):
-                await self.collect_ellipsoid_data(device, disco_mode)
+                await self.collect_ellipsoid_data(device, disco_mode, display_manager)
                 break  # Should not be reached due to reset
             elif self.button_manager.was_pressed("Button 2"):
-                await self.collect_alignment_data(disco_mode)
+                await self.collect_alignment_data(disco_mode, display_manager)
                 break  # Should not be reached due to reset
             elif self.button_manager.was_pressed("Button 4") and self.pwr_pin is not None:
                 self.pwr_pin.value = False

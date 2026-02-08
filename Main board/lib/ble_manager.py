@@ -41,6 +41,14 @@ class BleManager:
                 return None
         return None
 
+    def set_name(self, name: str):
+        """Send a BLE name change command to the slave."""
+        message = f"NAME:{name}\n".encode("utf-8")
+        self.drdy.value = True
+        self.uart.write(message)
+        time.sleep(0.1)
+        self.drdy.value = False
+
     def send_keep_alive(self):
         """Send a simple keep-alive message."""
         message = "ALIVE\n".encode("utf-8")

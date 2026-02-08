@@ -3,14 +3,45 @@ import time
 import busio
 import asyncio
 import digitalio
+import _bleio
+import microcontroller
 from adafruit_ble import BLERadio, Advertisement
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 import caveble  # Custom BLE service
 
+# --- NVM Name Storage ---
+DEFAULT_NAME = "SAP6_Sasquatch"
+NVM_MAGIC = 0xBE
+MAX_NAME_LEN = 20
+
+def read_name_from_nvm():
+    if microcontroller.nvm[0] != NVM_MAGIC:
+        return DEFAULT_NAME
+    length = microcontroller.nvm[1]
+    if length == 0 or length > MAX_NAME_LEN:
+        return DEFAULT_NAME
+    try:
+        return bytes(microcontroller.nvm[2:2 + length]).decode("utf-8")
+    except Exception:
+        return DEFAULT_NAME
+
+def save_name_to_nvm(name):
+    encoded = name.encode("utf-8")[:MAX_NAME_LEN]
+    microcontroller.nvm[0] = NVM_MAGIC
+    microcontroller.nvm[1] = len(encoded)
+    microcontroller.nvm[2:2 + len(encoded)] = encoded
+
 # BLE Setup
 ble = BLERadio()
-ble.name = "SAP6_BH"
+ble.name = read_name_from_nvm()
 print(f"BLE Name: {ble.name}")
+
+# Clear any stored bonds so the device always advertises with its
+# public address. No characteristics require encryption, so bonding
+# is unnecessary and stale bonds can make the device undiscoverable
+# on some phones after unpairing.
+_bleio.adapter.erase_bonding()
+print("Cleared BLE bonds")
 
 survey_protocol = caveble.SurveyProtocolService()
 advertisement = ProvideServicesAdvertisement(survey_protocol)
@@ -45,6 +76,22 @@ LZR_power = digitalio.DigitalInOut(board.A2)
 LZR_power.direction = digitalio.Direction.OUTPUT
 LZR_power.value = True  # Start HIGH power on
 
+def restart_advertising_with_name(new_name):
+    global advertisement, scan_response
+    if ble.advertising:
+        ble.stop_advertising()
+    ble.name = new_name
+    advertisement = ProvideServicesAdvertisement(survey_protocol)
+    scan_response = Advertisement()
+    scan_response.complete_name = new_name
+    scan_response.tx_power = 8
+    if not ble.connected:
+        ble._adapter.start_advertising(
+            bytes(advertisement),
+            scan_response=bytes(scan_response),
+            tx_power=8
+        )
+
 # UART Parsing Helper (only if your BLE send expects float data)
 def parse_uart_line(line):
     try:
@@ -76,6 +123,16 @@ async def read_uart_loop():
 
                     if decoded_line == "ALIVE":
                         print("Keep-alive received via UART")
+                        continue
+
+                    if decoded_line.startswith("NAME:"):
+                        new_name = decoded_line[5:].strip()
+                        if 1 <= len(new_name) <= MAX_NAME_LEN:
+                            save_name_to_nvm(new_name)
+                            restart_advertising_with_name(new_name)
+                            print(f"BLE name changed to: {new_name}")
+                        else:
+                            print(f"Invalid name length: {len(new_name)}")
                         continue
 
                     parsed = parse_uart_line(line)
@@ -151,6 +208,12 @@ async def monitor_ble_connection():
             else:
                 print("🔴 BLE Disconnected")
                 ble_connected.value = False
+                # Wipe any bonds created during the session so the
+                # device always advertises on its public address.
+                try:
+                    _bleio.adapter.erase_bonding()
+                except Exception as e:
+                    print(f"⚠️ Failed to erase bonding: {e}")
                 if not ble.connected and not ble.advertising:
                     try:
                         print("📣 Restarting BLE advertising at +8 dBm")
