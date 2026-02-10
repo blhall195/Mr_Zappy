@@ -10,7 +10,7 @@ from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 import caveble  # Custom BLE service
 
 # --- NVM Name Storage ---
-DEFAULT_NAME = "SAP6_Sasquatch"
+DEFAULT_NAME = "SAP6_Basic"
 NVM_MAGIC = 0xBE
 MAX_NAME_LEN = 20
 

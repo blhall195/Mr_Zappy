@@ -17,6 +17,27 @@ from display_manager import DisplayManager
 display = DisplayManager()
 print("Loading\nPlease wait...")
 
+import os
+if "snake_mode.txt" in os.listdir("/"):
+    os.remove("/snake_mode.txt")
+    import gc
+    import asyncio
+    import microcontroller
+    from sensor_manager import SensorManager
+    from button_manager import ButtonManager
+    from disco_manager import DiscoMode
+    sensor_manager = SensorManager()
+    sensor_manager.set_laser(False)
+    button_manager = ButtonManager()
+    disco_mode = DiscoMode(sensor_manager, brightness=1)
+    pwr_pin = digitalio.DigitalInOut(board.A2)
+    pwr_pin.direction = digitalio.Direction.OUTPUT
+    pwr_pin.value = not cfg_pin.value
+    gc.collect()
+    from snake import start_snake_game
+    asyncio.run(start_snake_game(display, button_manager, disco_mode, pwr_pin))
+    microcontroller.reset()
+
 from calibration_manager import CalibrationFlags
 calibration_flags = CalibrationFlags()
 
@@ -417,12 +438,13 @@ async def watch_for_button_presses():
                     sensor_manager.set_laser(False)
                     disco_mode.turn_off()
                     device.disco_on = False
-                    import gc
-                    gc.collect()
-                    from snake import start_snake_game
-                    await start_snake_game(display, button_manager, disco_mode, pwr_pin)
-                    gc.collect()
-                    button2_hold_start = None
+                    if "snake_mode.txt" not in os.listdir("/"):
+                        try:
+                            with open("/snake_mode.txt", "w") as f:
+                                f.write("1")
+                        except OSError as e:
+                            print(f"Failed to write snake_mode.txt: {e}")
+                    microcontroller.reset()
         else:
             # Button released - check if it was a short press for disco toggle
             if button2_hold_start is not None:

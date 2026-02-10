@@ -191,14 +191,9 @@ async def start_snake_game(display_manager, button_manager, disco_mode=None, pwr
         disco_mode: The DiscoMode instance from code.py (optional, for light effects)
         pwr_pin: The power control pin for LTC2952 shutdown (optional)
     """
-    print("\n" + "="*30)
     print("SNAKE GAME")
-    print("="*30)
-    print("Button 1 = Turn Left")
-    print("Button 2 = Turn Right")
-    print("Button 3 = Exit Game")
-    print("="*30 + "\n")
 
+    display_manager.display.root_group = displayio.CIRCUITPYTHON_TERMINAL
     gc.collect()
     game = SnakeGame(display_manager)
     game.show()
@@ -219,8 +214,7 @@ async def start_snake_game(display_manager, button_manager, disco_mode=None, pwr
             print("Exiting Snake Game...")
             if disco_mode:
                 disco_mode.turn_off()
-            display_manager.display_screen_initialise()
-            return
+            microcontroller.reset()
 
         if button_manager.was_pressed("Button 4") and pwr_pin is not None:
             print("Power off requested during snake game")
@@ -252,6 +246,6 @@ async def start_snake_game(display_manager, button_manager, disco_mode=None, pwr
             disco_mode.turn_off()
             await asyncio.sleep(0.2)
 
-    # Wait for user to see the game over screen
+    # Wait for user to see the game over screen, then reboot to normal mode
     await asyncio.sleep(3)
-    display_manager.display_screen_initialise()
+    microcontroller.reset()
