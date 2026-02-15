@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(~/.platformio/penv/Scripts/platformio.exe run:*)",
+      "Bash(~/.platformio/penv/Scripts/platformio.exe device monitor:*)",
+      "Bash(~/.platformio/penv/Scripts/platformio.exe device list:*)"
+    ]
+  }
+}

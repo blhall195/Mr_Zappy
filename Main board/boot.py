@@ -21,3 +21,5 @@ if trigger_pin.value:
 else:
     # A4 is pulled LOW (e.g. jumper to GND) — disable write access and disable USB
     storage.remount("/", readonly=True)
+    usb_midi.disable()
+    usb_hid.disable()

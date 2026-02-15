@@ -8,7 +8,7 @@ from laser_egismos import Laser, LaserError
 from adafruit_lsm6ds.ism330dhcx import ISM330DHCX
 import rm3100
 import adafruit_max1704x
-from collections import deque
+import math
 
 class SensorManager:
     def __init__(self):
@@ -19,8 +19,14 @@ class SensorManager:
         # Initialize I2C and accelerometer
         i2c = board.I2C()  # uses board.SCL and board.SDA
         self.grav_sensor = ISM330DHCX(i2c)
-        self._grav_history = []  # use a plain list
-        self._grav_maxlen = 3    # smoothing window size
+        self._grav_filtered = None  # complementary filter state (initialized on first read)
+        self._grav_last_time = None
+        self._grav_alpha_low = 0.03    # when still: heavy smoothing
+        self._grav_alpha_high = 0.8    # when moving: track fast
+        self._gyro_thresh_low = 0.05   # rad/s — below this, device is stationary
+        self._gyro_thresh_high = 0.5   # rad/s — above this, full tracking
+        self._gyro_bias = [0.0, 0.0, 0.0]  # estimated gyro bias, learned when stationary
+        self._gyro_bias_alpha = 0.001       # slow learning rate for bias estimation
 
         # Initialize mag_sensor with DRDY pin for non-blocking reads
         self.mag_drdy = digitalio.DigitalInOut(board.D9)
@@ -60,27 +66,69 @@ class SensorManager:
             return None
 
     def get_grav(self):
-        """Return smoothed gravity reading using a rolling average."""
+        """Return gravity reading using gyro-accelerometer complementary filter."""
         raw = self.grav_sensor.acceleration
         if raw is None:
-            return (0.0, 0.0, 0.0)
+            return self._grav_filtered or (0.0, 0.0, 0.0)
 
-        # Add new reading to history
-        self._grav_history.append(raw)
+        now = time.monotonic()
 
-        # Enforce fixed-length history
-        if len(self._grav_history) > self._grav_maxlen:
-            self._grav_history.pop(0)  # remove oldest
+        # Initialize on first call
+        if self._grav_filtered is None:
+            self._grav_filtered = raw
+            self._grav_last_time = now
+            return raw
 
-        # Calculate average
-        gx_sum = gy_sum = gz_sum = 0.0
-        for gx, gy, gz in self._grav_history:
-            gx_sum += gx
-            gy_sum += gy
-            gz_sum += gz
+        dt = now - self._grav_last_time
+        self._grav_last_time = now
 
-        n = len(self._grav_history)
-        return (gx_sum / n, gy_sum / n, gz_sum / n)
+        # Guard against large gaps or bad timing
+        if dt <= 0 or dt > 0.5:
+            self._grav_filtered = raw
+            return raw
+
+        # Read gyro angular rates (rad/s) from the same ISM330DHCX
+        gyro = self.grav_sensor.gyro
+        if gyro is None:
+            self._grav_filtered = raw
+            return raw
+
+        # Subtract estimated gyro bias
+        wx = gyro[0] - self._gyro_bias[0]
+        wy = gyro[1] - self._gyro_bias[1]
+        wz = gyro[2] - self._gyro_bias[2]
+        gx, gy, gz = self._grav_filtered
+
+        # Rotate previous gravity estimate by measured angular velocity
+        # (small-angle cross product approximation: v_new ≈ v + (ω × v) · dt)
+        pred_gx = gx + (wy * gz - wz * gy) * dt
+        pred_gy = gy + (wz * gx - wx * gz) * dt
+        pred_gz = gz + (wx * gy - wy * gx) * dt
+
+        # Dynamic alpha: smooth when still, track when moving
+        gyro_mag = math.sqrt(wx * wx + wy * wy + wz * wz)
+
+        # When stationary, slowly learn the gyro bias
+        if gyro_mag <= self._gyro_thresh_low:
+            ba = self._gyro_bias_alpha
+            self._gyro_bias[0] += ba * (gyro[0] - self._gyro_bias[0])
+            self._gyro_bias[1] += ba * (gyro[1] - self._gyro_bias[1])
+            self._gyro_bias[2] += ba * (gyro[2] - self._gyro_bias[2])
+
+        if gyro_mag <= self._gyro_thresh_low:
+            a = self._grav_alpha_low
+        elif gyro_mag >= self._gyro_thresh_high:
+            a = self._grav_alpha_high
+        else:
+            t = (gyro_mag - self._gyro_thresh_low) / (self._gyro_thresh_high - self._gyro_thresh_low)
+            a = self._grav_alpha_low + t * (self._grav_alpha_high - self._grav_alpha_low)
+        self._grav_filtered = (
+            a * raw[0] + (1 - a) * pred_gx,
+            a * raw[1] + (1 - a) * pred_gy,
+            a * raw[2] + (1 - a) * pred_gz,
+        )
+
+        return self._grav_filtered
 
     def get_mag(self):
         try:
