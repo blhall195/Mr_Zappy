@@ -71,6 +71,13 @@ disco_mode = DiscoMode(sensor_manager, brightness=1)
 time.sleep(0.05)#prevents brownout
 display.display_screen_initialise()
 
+# Low battery check on boot
+if sensor_manager.get_bat() <= 5:
+    display.update_sensor_readings("LOW", "BAT", 0)
+    disco_mode.set_red()
+    time.sleep(3)
+    pwr_pin.value = False
+
 class SystemState:
     IDLE = "IDLE"
     TAKING_MEASURMENT = "TAKING_MEASURMENT"
@@ -200,11 +207,14 @@ def save_reading_to_file(az, inc, dist):
         print("File write error:", e)
 
 async def flush_file_to_ble(ble):
+    remaining = device.ble_disconnection_counter
     try:
         with open("/pending_readings.txt", "r") as f:
             for line in f:
                 az, inc, dist = line.strip().split(",")
                 ble.send_message(float(az), float(inc), float(dist))
+                remaining -= 1
+                display.update_BT_number(remaining)
                 await asyncio.sleep(0.05)  # yields properly
     except OSError:
         return
@@ -506,6 +516,11 @@ async def check_battery_sensor():
     while True:
         device.readings.battery_level = sensor_manager.get_bat()
         display.update_battery(device.readings.battery_level)
+        if device.readings.battery_level <= 5:
+            display.update_sensor_readings("LOW", "BAT", 0)
+            disco_mode.set_red()
+            await asyncio.sleep(3)
+            pwr_pin.value = False
         await asyncio.sleep(30)
 
 
