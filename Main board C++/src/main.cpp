@@ -1,0 +1,1237 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_ISM330DHCX.h>
+#include <Adafruit_MAX1704X.h>
+#include "config.h"
+#include "device_context.h"
+#include "button_manager.h"
+#include "rm3100.h"
+#include "display_manager.h"
+#include "laser_egismos.h"
+#include "ble_manager.h"
+#include "mag_cal/calibration.h"
+#include "sensor_manager.h"
+#include "config_manager.h"
+#include "disco_manager.h"
+#include "menu_manager.h"
+#include "calibration_mode.h"
+
+// ── Embedded calibration data ──────────────────────────────────────
+// From Main board/calibration_dict.json — loaded at startup
+static const char CALIBRATION_JSON[] PROGMEM = R"({
+  "mag": {
+    "axes": "-X-Y-Z",
+    "transform": [[0.0225258, -0.000348105, -0.000709316],
+                   [0.000171691, 0.0221358, -0.000679377],
+                   [0.000447533, -0.000145672, 0.0225338]],
+    "centre": [-0.205928, -1.49322, 3.39001],
+    "rbfs": [[[0.003298], [-0.000433647], [0.000818552], [-0.00208113], [0.00252497]],
+             [[0.0], [0.0], [0.0], [0.0], [0.0]],
+             [[0.00067137], [0.000540657], [0.000939099], [0.00137892], [0.00192191]]],
+    "field_avg": 44.6264,
+    "field_std": 0.310694
+  },
+  "dip_avg": 68.9221,
+  "grav": {
+    "axes": "-Y-X+Z",
+    "transform": [[0.101936, -0.00167875, 0.000143624],
+                   [0.0015862, 0.10164, 0.000604115],
+                   [0.000153489, -0.000228592, 0.102199]],
+    "centre": [0.235023, 0.0249322, 0.100026],
+    "rbfs": [],
+    "field_avg": 9.81022,
+    "field_std": 0.00509215
+  }
+})";
+
+// ── MAX17048 subclass: skip reset() to preserve ModelGauge state ────
+// The stock begin() calls reset() which wipes the IC's learned battery
+// model, forcing a voltage-only "first guess" every boot.  By skipping
+// the reset the IC keeps tracking SOC across reboots (it still PORs on
+// its own if battery power is lost).
+class MAX17048_Persistent : public Adafruit_MAX17048 {
+public:
+    bool begin(TwoWire *wire = &Wire) {
+        if (i2c_dev) { delete i2c_dev; delete status_reg; }
+        i2c_dev = new Adafruit_I2CDevice(MAX17048_I2CADDR_DEFAULT, wire);
+        if (!i2c_dev->begin())   return false;
+        if (!isDeviceReady())    return false;
+        status_reg = new Adafruit_BusIO_Register(i2c_dev, MAX1704X_STATUS_REG);
+        // No reset() — preserve ModelGauge tracking state
+        enableSleep(false);
+        sleep(false);
+        wake();   // exit hibernation if the IC entered it
+        return true;
+    }
+};
+
+// ── Global state ────────────────────────────────────────────────────
+DeviceContext       ctx;
+ButtonManager       buttons;
+RM3100              mag;
+Adafruit_ISM330DHCX imu;
+MAX17048_Persistent battery;
+DisplayManager      display;
+LaserEgismos        laser;
+BleManager          ble;
+MagCal::Calibration calibration;
+SensorManager       sensorMgr;
+ConfigManager       configMgr;
+DiscoManager        disco;
+MenuManager         menuMgr;
+CalibrationMode     calMode;
+
+bool magOk   = false;
+bool imuOk   = false;
+bool batOk   = false;
+bool dispOk  = false;
+bool laserOk = false;
+bool bleOk   = false;
+bool calOk   = false;
+bool flashOk = false;
+static bool enterMenuMode  = false;
+static bool enterCalibMode = false;
+
+// Latest sensor readings
+static float lastMagX = 0, lastMagY = 0, lastMagZ = 0;
+static float lastAccX = 0, lastAccY = 0, lastAccZ = 0;
+static float lastGyrX = 0, lastGyrY = 0, lastGyrZ = 0;
+
+static float lastDistance = 0;
+
+// ── Timing statics ──────────────────────────────────────────────────
+static uint32_t lastSensorTime      = 0;
+static uint32_t lastSensorUpdate    = 0;
+static uint32_t lastBatRead         = 0;
+static float    lastBatPct          = 0.0f;
+static uint32_t lastDisplayRefresh  = 0;
+static uint32_t lastBleCheck        = 0;
+static uint32_t lastBleUartPoll     = 0;
+static uint32_t lastAutoShutCheck   = 0;
+static uint32_t lastLaserTimeCheck  = 0;
+
+// ── Button hold detection ───────────────────────────────────────────
+static uint32_t discoHoldStart = 0;
+static bool     discoHolding   = false;
+static uint32_t calibHoldStart = 0;
+static bool     calibHolding   = false;
+
+// ── Measurement state ───────────────────────────────────────────────
+static bool measRedLedSet = false;
+
+// ── BLE state ───────────────────────────────────────────────────────
+static bool lastBleConnected = false;
+
+// ── Forward declarations — init ────────────────────────────────────
+static void initPins();
+static void scanI2C();
+static void initSensors();
+static void initDisplay();
+static void initLaser();
+static void initBle();
+static void initFlash();
+static void initCalibration();
+static void initDisco();
+
+// ── Forward declarations — polling ──────────────────────────────────
+static void readSensorsUpdate(uint32_t now);
+static void pollButtons(uint32_t now);
+static void pollMeasurement(uint32_t now);
+static void pollBLEPin(uint32_t now);
+static void pollBLECommands(uint32_t now);
+static void pollBattery(uint32_t now);
+static void checkAutoShutoff(uint32_t now);
+static void checkLaserTimeout(uint32_t now);
+static void updateDisplay(uint32_t now);
+
+// ── Forward declarations — helpers ──────────────────────────────────
+static void handleMeasurementSuccess();
+static void alertError(const char* errCode);
+static void resetLaser();
+static void doShutdown();
+static float circularDiff(float a, float b);
+static bool bearingsWithinTol(const float* vals, uint8_t n, float tol);
+static bool linearWithinTol(const float* vals, uint8_t n, float tol);
+static void onFlushReading(float az, float inc, float dist);
+
+// ═══════════════════════════════════════════════════════════════════
+// ── Setup ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+void setup() {
+    Serial.begin(115200);
+    while (!Serial && millis() < 3000) { }
+    delay(200);
+
+    Serial.println(F("=== Mr_Zappy Main Board C++ ==="));
+    Serial.println(F("Session 12 — Full Integration"));
+    Serial.println();
+
+    initPins();
+    buttons.begin();
+
+    Wire.begin();
+    Wire.setClock(400000);
+
+    Serial.println(F("I2C bus scan:"));
+    scanI2C();
+    Serial.println();
+
+    initSensors();
+    initDisplay();
+    initLaser();
+    initBle();
+    initFlash();
+    initCalibration();
+    initDisco();
+
+    // ── Startup: turn laser on with beep ───────────────────────────
+    if (laserOk) {
+        laser.setBuzzer(false);
+        delay(25);
+        laser.setLaser(true);
+        delay(200);
+        laser.setBuzzer(true);   // startup beep
+        delay(100);
+        laser.setBuzzer(false);
+        delay(25);
+        ctx.laserEnabled = true;
+    }
+
+    // ── Low battery check on boot ────────────────────────────────
+    // Skip if 0% — that means no LiPo connected (USB-only power)
+    if (batOk && lastBatPct > 0.5f && lastBatPct <= Timing::BATTERY_SHUTDOWN_PCT) {
+        Serial.println(F("LOW BATTERY — shutting down"));
+        if (dispOk) {
+            display.updateDistanceText("LOW");
+            display.updateAzimuth(0);
+            display.updateInclination(0);
+            display.refresh();
+        }
+        disco.setRed();
+        delay(3000);
+        doShutdown();
+    }
+
+    // ── Pending readings display ─────────────────────────────────
+    if (dispOk) {
+        display.updateBTNumber(ctx.bleDisconnectionCounter);
+    }
+
+    // ── BLE device name ──────────────────────────────────────────
+    if (bleOk) {
+        ble.setName("SAP6_Unicorn");
+    }
+
+    // ── Check for boot mode overrides ────────────────────────────
+    buttons.update();
+    if (buttons.isPressed(Button::CALIB)) {
+        Serial.println(F("CALIB held at boot — entering menu mode"));
+        enterMenuMode = true;
+    }
+
+    // Enter menu mode if flag was set or CALIB held
+    if (enterMenuMode && dispOk) {
+        display.showStartingMenu();
+        delay(500);
+        menuMgr.begin(display.getDisplay(), ctx, configMgr);
+    }
+
+    // Enter calibration mode if flag was set
+    if (enterCalibMode && magOk && imuOk && dispOk && laserOk) {
+        calMode.begin(buttons, display, disco, laser, mag, imu,
+                      configMgr, calibration);
+    }
+
+    ctx.lastActivityTime = millis();
+    lastSensorTime = millis();
+
+    if (calMode.isActive()) {
+        Serial.println(F("Running. Calibration mode."));
+    } else if (menuMgr.isActive()) {
+        Serial.println(F("Running. Menu mode."));
+    } else {
+        Serial.println(F("Running. Normal mode."));
+    }
+    Serial.println();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ── Main Loop ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+void loop() {
+    uint32_t now = millis();
+
+    buttons.update();
+
+    // ── Menu mode: hand off to MenuManager, skip everything else ──
+    if (menuMgr.isActive()) {
+        menuMgr.update(buttons);
+        delay(Timing::LOOP_INTERVAL_MS);
+        return;
+    }
+
+    // ── Handle menu exit transitions (one-shot) ──
+    if (menuMgr.exitAction() == MenuExitAction::ENTER_CALIB) {
+        menuMgr.clearExitAction();
+        if (magOk && imuOk && dispOk && laserOk) {
+            Serial.println(F("Transitioning: menu → calibration"));
+            calMode.begin(buttons, display, disco, laser, mag, imu,
+                          configMgr, calibration);
+        } else {
+            Serial.println(F("Cannot enter calibration — sensors not ready"));
+            display.initScreen();
+            ctx.lastActivityTime = millis();
+        }
+        delay(Timing::LOOP_INTERVAL_MS);
+        return;
+    }
+    if (menuMgr.exitAction() == MenuExitAction::RETURN_NORMAL) {
+        menuMgr.clearExitAction();
+        Serial.println(F("Returning to normal mode"));
+        display.initScreen();
+        if (laserOk) {
+            laser.setLaser(true);
+            delay(25);
+            laser.setBuzzer(true);
+            delay(100);
+            laser.setBuzzer(false);
+            delay(25);
+        }
+        ctx.laserEnabled = true;
+        ctx.lastActivityTime = millis();
+    }
+
+    // ── Calibration mode: CalibrationMode owns the loop ──
+    if (calMode.isActive()) {
+        bool done = calMode.update();
+        if (done) {
+            Serial.println(F("Calibration mode finished."));
+            calOk = calibration.isCalibrated();
+            if (calOk) {
+                sensorMgr.init(&calibration, ctx.config.emaAlpha,
+                               ctx.config.stabilityBufferLength);
+            }
+            display.initScreen();
+            if (laserOk) {
+                laser.setLaser(true);
+                delay(25);
+                laser.setBuzzer(true);
+                delay(100);
+                laser.setBuzzer(false);
+                delay(25);
+            }
+            ctx.laserEnabled = true;
+            ctx.lastActivityTime = millis();
+        }
+        delay(Timing::LOOP_INTERVAL_MS);
+        return;
+    }
+
+    // ── Normal operation: cooperative polling ─────────────────────
+    readSensorsUpdate(now);
+    pollButtons(now);
+    pollMeasurement(now);
+    pollBLEPin(now);
+    pollBLECommands(now);
+    pollBattery(now);
+    checkAutoShutoff(now);
+    checkLaserTimeout(now);
+    updateDisplay(now);
+    disco.update(lastAccX, lastAccY, lastAccZ);
+
+    // ── Deferred flash write: sync RAM-buffered readings when idle ──
+    if (ctx.currentState == SystemState::IDLE && flashOk &&
+        configMgr.hasPendingToSync()) {
+        configMgr.syncPendingToFlash();
+    }
+
+    delay(Timing::LOOP_INTERVAL_MS);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ── Polling Functions ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Read sensors + update fusion at 50 Hz ───────────────────────
+static void readSensorsUpdate(uint32_t now) {
+    if (now - lastSensorUpdate < Timing::SENSOR_POLL_MS) return;
+
+    float dt = (now - lastSensorTime) * 0.001f;
+    lastSensorTime = now;
+    lastSensorUpdate = now;
+
+    if (magOk) {
+        RM3100::Reading mr = mag.readSingle();
+        mag.toMicroTesla(mr, lastMagX, lastMagY, lastMagZ);
+    }
+
+    if (imuOk) {
+        sensors_event_t accel, gyro, temp;
+        imu.getEvent(&accel, &gyro, &temp);
+        lastAccX = accel.acceleration.x;
+        lastAccY = accel.acceleration.y;
+        lastAccZ = accel.acceleration.z;
+        lastGyrX = gyro.gyro.x;
+        lastGyrY = gyro.gyro.y;
+        lastGyrZ = gyro.gyro.z;
+    }
+
+    if (calOk && magOk && imuOk) {
+        Eigen::Vector3f rawMag(lastMagX, lastMagY, lastMagZ);
+        Eigen::Vector3f rawGrav(lastAccX, lastAccY, lastAccZ);
+        Eigen::Vector3f rawGyro(lastGyrX, lastGyrY, lastGyrZ);
+        sensorMgr.update(rawMag, rawGrav, rawGyro, dt);
+    }
+}
+
+// ── Button event handling ───────────────────────────────────────
+static void pollButtons(uint32_t now) {
+    // ── Button 1 (MEASURE) — take measurement or wake laser ──
+    if (buttons.wasPressed(Button::MEASURE)) {
+        ctx.purpleLatched = false;
+        ctx.lastActivityTime = now;
+
+        if (ctx.laserEnabled) {
+            // Laser already on — just enter measurement state, no UART needed
+            ctx.currentState = SystemState::TAKING_MEASUREMENT;
+            ctx.measurementTaken = false;
+            measRedLedSet = false;
+            Serial.println(F("MEASURE: taking measurement"));
+        } else if (ctx.currentState == SystemState::IDLE) {
+            // Laser was off — beep + turn on
+            if (laserOk) {
+                laser.setBuzzer(true);
+                delay(25);
+                laser.setLaser(true);
+                delay(200);
+                laser.setBuzzer(false);
+                delay(25);
+            }
+            ctx.laserEnabled = true;
+            Serial.println(F("MEASURE: laser re-enabled"));
+        } else {
+            Serial.println(F("MEASURE: system busy, ignored"));
+            ctx.currentState = SystemState::IDLE;
+        }
+    }
+
+    // ── Button 2 (DISCO) — short press: toggle disco, hold 5s: snake ──
+    if (buttons.isPressed(Button::DISCO)) {
+        ctx.lastActivityTime = now;
+        if (!discoHolding) {
+            discoHoldStart = now;
+            discoHolding = true;
+        } else {
+            uint32_t held = now - discoHoldStart;
+            if (held >= Timing::SNAKE_HOLD_MS &&
+                ctx.currentState == SystemState::IDLE) {
+                Serial.println(F("DISCO held 5s — launching snake mode"));
+                if (laserOk) laser.setLaser(false);
+                disco.turnOff();
+                ctx.discoOn = false;
+                if (flashOk) configMgr.writeFlag(Flags::SNAKE);
+                NVIC_SystemReset();
+            }
+        }
+    } else {
+        // Released — check for short press
+        if (discoHolding) {
+            uint32_t held = now - discoHoldStart;
+            if (held < Timing::SNAKE_HOLD_MS) {
+                if (ctx.discoOn) {
+                    disco.turnOff();
+                    ctx.discoOn = false;
+                    if (laserOk) laser.setLaser(false);
+                    ctx.laserEnabled = false;
+                    Serial.println(F("DISCO: off"));
+                } else {
+                    disco.startDisco();
+                    ctx.discoOn = true;
+                    if (laserOk) laser.setLaser(false);
+                    ctx.laserEnabled = false;
+                    Serial.println(F("DISCO: on"));
+                }
+            }
+            discoHolding = false;
+        }
+    }
+
+    // ── Button 3 (CALIB) — hold 2s: enter menu mode ──
+    if (buttons.isPressed(Button::CALIB)) {
+        ctx.lastActivityTime = now;
+        if (!calibHolding) {
+            calibHoldStart = now;
+            calibHolding = true;
+        } else {
+            uint32_t held = now - calibHoldStart;
+            if (held >= Timing::CALIB_HOLD_MS &&
+                ctx.currentState == SystemState::IDLE) {
+                Serial.println(F("CALIB held 2s — entering menu mode"));
+                if (laserOk) laser.setLaser(false);
+                ctx.laserEnabled = false;
+                disco.turnOff();
+                ctx.discoOn = false;
+                menuMgr.begin(display.getDisplay(), ctx, configMgr);
+                calibHolding = false;
+                return;  // skip rest of pollButtons
+            }
+        }
+    } else {
+        calibHolding = false;
+    }
+
+    // ── Button 4 (SHUTDOWN) — power off with post-measurement guard ──
+    if (buttons.wasPressed(Button::SHUTDOWN)) {
+        uint32_t elapsed = now - ctx.lastMeasurementTime;
+        if (elapsed < Timing::MEASURE_GUARD_MS) {
+            Serial.println(F("SHUTDOWN: guarding after measurement"));
+            delay(Timing::MEASURE_GUARD_MS - elapsed);
+        }
+        Serial.println(F("SHUTDOWN: powering off"));
+        doShutdown();
+    }
+
+    // ── Fire button (FIRE) — same as MEASURE (trigger button) ──
+    if (buttons.wasPressed(Button::FIRE)) {
+        ctx.purpleLatched = false;
+        ctx.lastActivityTime = now;
+
+        if (ctx.laserEnabled) {
+            // Laser already on — just enter measurement state
+            ctx.currentState = SystemState::TAKING_MEASUREMENT;
+            ctx.measurementTaken = false;
+            measRedLedSet = false;
+            Serial.println(F("FIRE: taking measurement"));
+        } else if (ctx.currentState == SystemState::IDLE) {
+            if (laserOk) {
+                laser.setBuzzer(true);
+                delay(25);
+                laser.setLaser(true);
+                delay(200);
+                laser.setBuzzer(false);
+                delay(25);
+            }
+            ctx.laserEnabled = true;
+            Serial.println(F("FIRE: laser re-enabled"));
+        }
+    }
+}
+
+// ── Measurement workflow ────────────────────────────────────────
+static void pollMeasurement(uint32_t now) {
+    if (ctx.currentState != SystemState::TAKING_MEASUREMENT) return;
+    if (ctx.measurementTaken) return;
+    if (!calOk || !magOk || !imuOk || !laserOk) {
+        Serial.println(F("MEAS: sensors not ready"));
+        ctx.currentState = SystemState::IDLE;
+        return;
+    }
+
+    // Set red LED once on entry
+    if (!measRedLedSet) {
+        if (!ctx.purpleLatched) {
+            disco.setRed();
+        }
+        // Ensure laser is on (only sends UART if it was off)
+        if (!ctx.laserEnabled) {
+            laser.setLaser(true);
+            delay(200);
+            ctx.laserEnabled = true;
+        }
+        // Entry click buzzer
+        if (laserOk) {
+            laser.setBuzzer(true);
+            delay(100);
+            laser.setBuzzer(false);
+            delay(25);
+        }
+        measRedLedSet = true;
+    }
+
+    // Wait for stability — debug print every ~1s so we know it's alive
+    if (!sensorMgr.isStable(ctx.config.stabilityTolerance)) {
+        static uint32_t lastStabDbg = 0;
+        uint32_t n = millis();
+        if (n - lastStabDbg > 1000) {
+            lastStabDbg = n;
+            Serial.print(F("MEAS: waiting stable  AZ="));
+            Serial.print(sensorMgr.getAzimuth(), 1);
+            Serial.print(F(" INC="));
+            Serial.print(sensorMgr.getInclination(), 1);
+            Serial.print(F(" tol="));
+            Serial.println(ctx.config.stabilityTolerance, 1);
+        }
+        return;
+    }
+    Serial.println(F("MEAS: stable — measuring"));
+
+    // ── Stable — take measurement ────────────────────────────
+    ctx.readings.azimuth     = sensorMgr.getAzimuth();
+    ctx.readings.inclination = sensorMgr.getInclination();
+    ctx.readings.roll        = sensorMgr.getRoll();
+
+    // Flush any stale UART data before talking to laser
+    while (Serial1.available()) Serial1.read();
+    delay(50);  // let the UART line settle
+
+    // Take laser distance
+    Serial.println(F("MEAS: sending measure cmd..."));
+    int32_t distMm = 0;
+    LaserError lErr = laser.measure(distMm);
+    Serial.print(F("MEAS: result="));
+    Serial.print(LaserEgismos::errorString(lErr));
+    Serial.print(F(" mm="));
+    Serial.println(distMm);
+    if (lErr != LaserError::OK) {
+        Serial.print(F("MEAS: laser error: "));
+        Serial.println(LaserEgismos::errorString(lErr));
+        resetLaser();
+        alertError("LzrERR");
+        ctx.currentState = SystemState::IDLE;
+        return;
+    }
+
+    ctx.readings.distance = (distMm / 1000.0f) + ctx.config.laserDistanceOffset;
+    lastDistance = ctx.readings.distance;
+    Serial.print(F("MEAS: dist=")); Serial.println(ctx.readings.distance, 3);
+
+    // Anomaly detection
+    Serial.println(F("MEAS: checking anomaly..."));
+    if (ctx.config.anomalyDetection) {
+        Eigen::Vector3f rawMag(lastMagX, lastMagY, lastMagZ);
+        Eigen::Vector3f rawGrav(lastAccX, lastAccY, lastAccZ);
+        MagCal::Strictness strict = {
+            ctx.config.magTolerance,
+            ctx.config.gravTolerance,
+            ctx.config.dipTolerance
+        };
+        MagCal::AnomalyType anom = calibration.checkAnomaly(rawMag, rawGrav, strict);
+        if (anom != MagCal::AnomalyType::NONE) {
+            const char* errStr = "Err";
+            switch (anom) {
+                case MagCal::AnomalyType::MAGNETIC: errStr = "MagErr"; break;
+                case MagCal::AnomalyType::GRAVITY:  errStr = "GravErr"; break;
+                case MagCal::AnomalyType::DIP:      errStr = "DipErr"; break;
+                default: break;
+            }
+            Serial.print(F("MEAS: anomaly: ")); Serial.println(errStr);
+            alertError(errStr);
+            // Still update display with the readings
+            if (dispOk) {
+                display.updateSensorReadings(ctx.readings.distance,
+                                             ctx.readings.azimuth,
+                                             ctx.readings.inclination);
+                display.refresh();
+            }
+            ctx.currentState = SystemState::IDLE;
+            return;
+        }
+    }
+
+    // Success!
+    Serial.println(F("MEAS: calling handleSuccess..."));
+    handleMeasurementSuccess();
+    Serial.println(F("MEAS: handleSuccess done"));
+
+    // Update display
+    if (dispOk) {
+        display.updateSensorReadings(ctx.readings.distance,
+                                     ctx.readings.azimuth,
+                                     ctx.readings.inclination);
+        display.refresh();
+    }
+
+    // Turn laser off — display freezes with last readings shown.
+    // Next button press will re-enable laser + live display.
+    if (laserOk) laser.setLaser(false);
+    ctx.laserEnabled = false;
+
+    if (!ctx.purpleLatched) {
+        disco.turnOff();
+    }
+
+    ctx.currentState = SystemState::IDLE;
+
+    Serial.print(F("MEAS OK: AZ="));
+    Serial.print(ctx.readings.azimuth, 1);
+    Serial.print(F(" INC="));
+    Serial.print(ctx.readings.inclination, 1);
+    Serial.print(F(" DIST="));
+    Serial.println(ctx.readings.distance, 2);
+}
+
+// ── Handle successful measurement ───────────────────────────────
+static void handleMeasurementSuccess() {
+    ctx.lastMeasurementTime = millis();
+
+    // Green LED + success beep
+    disco.setGreen();
+    if (laserOk) {
+        delay(25);
+        laser.setBuzzer(true);
+        delay(100);
+        laser.setBuzzer(false);
+        delay(25);
+    } else {
+        delay(150);
+    }
+
+    Serial.print(F("  HS:2 bleConn="));
+    Serial.print(ctx.bleConnected);
+    Serial.print(F(" bleOk="));
+    Serial.println(bleOk);
+    Serial.flush();
+    delay(50);
+    // Send via BLE or queue
+    if (ctx.bleConnected && bleOk) {
+        Serial.println(F("  HS:2a ble send")); Serial.flush(); delay(50);
+        ble.sendSurveyData(ctx.readings.azimuth,
+                           ctx.readings.inclination,
+                           ctx.readings.distance);
+        ctx.bleDisconnectionCounter = 0;
+    } else {
+        ctx.bleDisconnectionCounter++;
+        if (dispOk) display.updateBTNumber(ctx.bleDisconnectionCounter);
+        // Buffer reading in RAM — synced to flash during IDLE or shutdown
+        configMgr.appendPendingReading(ctx.readings.azimuth,
+                                       ctx.readings.inclination,
+                                       ctx.readings.distance);
+    }
+
+    // ── Leg consistency buffer ────────────────────────────────
+    Serial.println(F("  HS:3 leg buf")); Serial.flush();
+    uint8_t idx = ctx.stableBufCount;
+    if (idx < 3) {
+        ctx.stableAzimuthBuf[idx]     = ctx.readings.azimuth;
+        ctx.stableInclinationBuf[idx] = ctx.readings.inclination;
+        ctx.stableDistanceBuf[idx]    = ctx.readings.distance;
+        ctx.stableBufCount++;
+    } else {
+        // Shift left and add new
+        ctx.stableAzimuthBuf[0]     = ctx.stableAzimuthBuf[1];
+        ctx.stableAzimuthBuf[1]     = ctx.stableAzimuthBuf[2];
+        ctx.stableAzimuthBuf[2]     = ctx.readings.azimuth;
+        ctx.stableInclinationBuf[0] = ctx.stableInclinationBuf[1];
+        ctx.stableInclinationBuf[1] = ctx.stableInclinationBuf[2];
+        ctx.stableInclinationBuf[2] = ctx.readings.inclination;
+        ctx.stableDistanceBuf[0]    = ctx.stableDistanceBuf[1];
+        ctx.stableDistanceBuf[1]    = ctx.stableDistanceBuf[2];
+        ctx.stableDistanceBuf[2]    = ctx.readings.distance;
+    }
+
+    Serial.println(F("  HS:4 leg check")); Serial.flush();
+    // Check leg completion when we have 3 readings
+    if (ctx.stableBufCount >= 3) {
+        bool azOk   = bearingsWithinTol(ctx.stableAzimuthBuf, 3,
+                                         ctx.config.legAngleTolerance);
+        bool incOk  = linearWithinTol(ctx.stableInclinationBuf, 3,
+                                       ctx.config.legAngleTolerance);
+        bool distOk = linearWithinTol(ctx.stableDistanceBuf, 3,
+                                       ctx.config.legDistanceTolerance);
+
+        if (azOk && incOk && distOk) {
+            // Leg complete! Triple buzz + white flash
+            for (int i = 0; i < 3; i++) {
+                if (laserOk) laser.setBuzzer(true);
+                disco.setWhite();
+                delay(100);
+                if (laserOk) laser.setBuzzer(false);
+                disco.turnOff();
+                delay(100);
+            }
+
+            // Clear buffers
+            ctx.stableBufCount = 0;
+
+            // Latch purple
+            disco.setPurple();
+            ctx.purpleLatched = true;
+            ctx.measurementTaken = true;
+
+            Serial.println(F("LEG COMPLETE — 3 consistent readings"));
+            return;
+        }
+    }
+
+    Serial.println(F("  HS:5 done")); Serial.flush();
+    ctx.measurementTaken = false;
+}
+
+// ── Error alert — red flash sequence ────────────────────────────
+static void alertError(const char* errCode) {
+    if (dispOk) {
+        display.updateDistanceText(errCode);
+        display.refresh();
+    }
+
+    disco.turnOff();
+    for (int i = 0; i < 4; i++) {
+        disco.setRed();
+        delay(100);
+        disco.turnOff();
+        delay(100);
+    }
+
+    // Beep after error flashes, re-enable laser
+    if (laserOk) {
+        laser.setBuzzer(true);
+        delay(100);
+        laser.setBuzzer(false);
+        delay(25);
+        laser.setLaser(true);
+        delay(25);
+    }
+    ctx.laserEnabled = true;
+    ctx.measurementTaken = true;
+}
+
+// ── BLE pin monitoring (connection state + flush) ───────────────
+static void pollBLEPin(uint32_t now) {
+    if (!bleOk) return;
+    if (now - lastBleCheck < Timing::BLE_PIN_CHECK_MS) return;
+    lastBleCheck = now;
+
+    bool connected = ble.isConnected();
+    ctx.bleConnected = connected;
+
+    // Transition: disconnected → connected
+    if (connected && !lastBleConnected) {
+        Serial.println(F("BLE: connected"));
+
+        // Flush pending readings if any
+        if (ctx.bleDisconnectionCounter > 0 && flashOk) {
+            disco.setBlue();
+            if (dispOk) {
+                display.updateBTNumber(ctx.bleDisconnectionCounter);
+                display.refresh();
+            }
+            delay(1000);   // let BLE slave be ready
+
+            configMgr.flushPendingReadings(onFlushReading);
+            configMgr.clearPendingReadings();
+
+            ctx.bleDisconnectionCounter = 0;
+            ctx.bleReadingsTransferredFlag = false;
+            disco.turnOff();
+            Serial.println(F("BLE: pending readings flushed"));
+        }
+    }
+
+    if (!connected && lastBleConnected) {
+        Serial.println(F("BLE: disconnected"));
+    }
+
+    // Update display
+    if (dispOk) {
+        display.updateBTLabel(connected);
+        if (connected) {
+            if (ctx.bleReadingsTransferredFlag) {
+                display.updateBTNumber(0);
+                ctx.bleDisconnectionCounter = 0;
+            } else {
+                display.updateBTNumber(0);
+            }
+        } else {
+            display.updateBTNumber(ctx.bleDisconnectionCounter);
+        }
+    }
+
+    lastBleConnected = connected;
+}
+
+// ── BLE UART command processing ─────────────────────────────────
+static void pollBLECommands(uint32_t now) {
+    if (!bleOk) return;
+    if (now - lastBleUartPoll < Timing::BLE_UART_POLL_MS) return;
+    lastBleUartPoll = now;
+
+    ble.update();
+    if (!ble.hasCommand()) return;
+
+    BleCommand cmd = ble.readCommand();
+    Serial.print(F("BLE CMD: "));
+    Serial.println(BleManager::commandName(cmd));
+
+    switch (cmd) {
+        case BleCommand::ACK_RECEIVED:
+            ctx.bleReadingsTransferredFlag = true;
+            break;
+
+        case BleCommand::TAKE_SHOT:
+            ctx.currentState = SystemState::TAKING_MEASUREMENT;
+            ctx.measurementTaken = false;
+            measRedLedSet = false;
+            ctx.lastActivityTime = now;
+            break;
+
+        case BleCommand::LASER_ON:
+            if (laserOk) laser.setLaser(true);
+            ctx.laserEnabled = true;
+            break;
+
+        case BleCommand::LASER_OFF:
+            if (laserOk) laser.setLaser(false);
+            ctx.laserEnabled = false;
+            break;
+
+        case BleCommand::DEVICE_OFF:
+            doShutdown();
+            break;
+
+        case BleCommand::START_CAL:
+            Serial.println(F("BLE: entering menu mode"));
+            if (laserOk) laser.setLaser(false);
+            ctx.laserEnabled = false;
+            disco.turnOff();
+            ctx.discoOn = false;
+            menuMgr.begin(display.getDisplay(), ctx, configMgr);
+            break;
+
+        case BleCommand::STOP_CAL:
+            ctx.currentState = SystemState::IDLE;
+            break;
+
+        default:
+            break;
+    }
+}
+
+// ── Battery check (every 30s) ───────────────────────────────────
+static void pollBattery(uint32_t now) {
+    if (!batOk) return;
+    if (now - lastBatRead < Timing::BATTERY_CHECK_MS) return;
+    lastBatRead = now;
+
+    lastBatPct = battery.cellPercent();
+    ctx.readings.batteryLevel = lastBatPct;
+    Serial.print(F("BAT: ")); Serial.print(battery.cellVoltage(), 3);
+    Serial.print(F("V  ")); Serial.print(lastBatPct, 1); Serial.println(F("%"));
+
+    if (dispOk) display.updateBattery(lastBatPct);
+
+    if (lastBatPct > 0.5f && lastBatPct <= Timing::BATTERY_SHUTDOWN_PCT) {
+        Serial.println(F("LOW BATTERY — shutting down"));
+        if (dispOk) {
+            display.updateDistanceText("LOW");
+            display.updateAzimuth(0);
+            display.updateInclination(0);
+            display.refresh();
+        }
+        disco.setRed();
+        delay(3000);
+        doShutdown();
+    }
+}
+
+// ── Auto shutdown check (every 5s) ──────────────────────────────
+static void checkAutoShutoff(uint32_t now) {
+    if (now - lastAutoShutCheck < Timing::AUTO_SHUTOFF_CHECK_MS) return;
+    lastAutoShutCheck = now;
+
+    uint32_t inactiveSec = (now - ctx.lastActivityTime) / 1000;
+    if (inactiveSec > ctx.config.autoShutdownTimeout) {
+        Serial.println(F("Inactivity timeout — shutting down"));
+        doShutdown();
+    }
+}
+
+// ── Laser timeout check (every 1s) ─────────────────────────────
+static void checkLaserTimeout(uint32_t now) {
+    if (now - lastLaserTimeCheck < Timing::LASER_TIMEOUT_CHECK_MS) return;
+    lastLaserTimeCheck = now;
+
+    if (!ctx.laserEnabled) return;
+
+    uint32_t inactiveSec = (now - ctx.lastActivityTime) / 1000;
+    if (inactiveSec > ctx.config.laserTimeout) {
+        Serial.println(F("Laser timeout — turning off"));
+        if (laserOk) laser.setLaser(false);
+        ctx.laserEnabled = false;
+    }
+}
+
+// ── Display update (4 Hz) ───────────────────────────────────────
+static void updateDisplay(uint32_t now) {
+    if (!dispOk) return;
+    if (now - lastDisplayRefresh < Timing::DISPLAY_REFRESH_MS) return;
+    lastDisplayRefresh = now;
+
+    // Only update live sensor readings when laser is on.
+    // After a measurement the laser is off and the display stays frozen
+    // showing the last reading until the user presses MEASURE again.
+    if (ctx.laserEnabled) {
+        if (calOk) {
+            display.updateSensorReadings(lastDistance,
+                                         sensorMgr.getAzimuth(),
+                                         sensorMgr.getInclination());
+        } else {
+            float heading = atan2f(lastMagY, lastMagX) * (180.0f / PI);
+            if (heading < 0) heading += 360.0f;
+            float tilt = atan2f(lastAccZ,
+                         sqrtf(lastAccX * lastAccX + lastAccY * lastAccY))
+                         * (180.0f / PI);
+            display.updateSensorReadings(lastDistance, heading, tilt);
+        }
+    }
+
+    display.updateBattery(lastBatPct);
+    display.updateBTLabel(bleOk ? ble.isConnected() : false);
+    display.refresh();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ── Helper Functions ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+
+static void resetLaser() {
+    if (!laserOk) return;
+    Serial.println(F("LASER: resetting"));
+    laser.setLaser(false);
+    delay(100);
+    while (Serial1.available()) Serial1.read();  // flush UART
+    laser.setLaser(true);
+    delay(200);  // let module stabilise
+    ctx.laserEnabled = true;
+}
+
+static void doShutdown() {
+    Serial.println(F(">>> SHUTDOWN"));
+    // Flush any unsaved readings to flash before power dies
+    if (flashOk && configMgr.hasPendingToSync()) {
+        configMgr.syncPendingToFlash();
+    }
+    Serial.flush();
+    digitalWrite(PIN_POWER, LOW);
+    // If still running (USB-powered), just hang
+    while (true) { delay(1000); }
+}
+
+static float circularDiff(float a, float b) {
+    float d = fmodf(a - b + 180.0f, 360.0f) - 180.0f;
+    return fabsf(d);
+}
+
+static bool bearingsWithinTol(const float* vals, uint8_t n, float tol) {
+    for (uint8_t i = 0; i < n; i++) {
+        for (uint8_t j = i + 1; j < n; j++) {
+            if (circularDiff(vals[i], vals[j]) > tol) return false;
+        }
+    }
+    return true;
+}
+
+static bool linearWithinTol(const float* vals, uint8_t n, float tol) {
+    for (uint8_t i = 0; i < n; i++) {
+        for (uint8_t j = i + 1; j < n; j++) {
+            if (fabsf(vals[i] - vals[j]) > tol) return false;
+        }
+    }
+    return true;
+}
+
+static void onFlushReading(float az, float inc, float dist) {
+    Serial.print(F("FLUSH: az=")); Serial.print(az, 1);
+    Serial.print(F(" inc=")); Serial.print(inc, 1);
+    Serial.print(F(" dist=")); Serial.println(dist, 2);
+    ble.sendSurveyData(az, inc, dist);
+    delay(50);   // pacing between BLE sends
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ── Initialization Functions (unchanged from previous sessions) ───
+// ═══════════════════════════════════════════════════════════════════
+
+static void initPins() {
+    pinMode(PIN_BTN_MEASURE,  INPUT_PULLUP);
+    pinMode(PIN_BTN_DISCO,    INPUT_PULLUP);
+    pinMode(PIN_BTN_CALIB,    INPUT_PULLUP);
+    pinMode(PIN_BTN_SHUTDOWN, INPUT_PULLUP);
+    pinMode(PIN_BTN_FIRE,     INPUT_PULLUP);
+
+    pinMode(PIN_POWER, OUTPUT);
+    digitalWrite(PIN_POWER, HIGH);
+
+    pinMode(PIN_BLE_STATUS, INPUT_PULLDOWN);
+    pinMode(PIN_BLE_DRDY,   OUTPUT);
+    digitalWrite(PIN_BLE_DRDY, LOW);
+
+    pinMode(PIN_MAG_DRDY, INPUT);
+    pinMode(PIN_CFG, INPUT_PULLUP);
+
+    Serial.println(F("Pins initialized."));
+}
+
+static void scanI2C() {
+    uint8_t count = 0;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            Serial.print(F("  0x"));
+            if (addr < 16) Serial.print('0');
+            Serial.print(addr, HEX);
+            if (addr == RM3100_I2C_ADDR)  Serial.print(F(" (RM3100 mag)"));
+            if (addr == ISM330DHCX_ADDR)  Serial.print(F(" (ISM330DHCX accel/gyro)"));
+            if (addr == MAX17048_ADDR)    Serial.print(F(" (MAX17048 battery)"));
+            if (addr == SH1107_ADDR)      Serial.print(F(" (SH1107 OLED)"));
+            Serial.println();
+            count++;
+        }
+    }
+    Serial.print(F("  Found "));
+    Serial.print(count);
+    Serial.println(F(" device(s)."));
+}
+
+static void initSensors() {
+    magOk = mag.begin(Wire, RM3100_I2C_ADDR, RM3100_CYCLE_COUNT, PIN_MAG_DRDY);
+    Serial.print(F("RM3100:      "));
+    Serial.println(magOk ? F("OK") : F("FAILED"));
+
+    imuOk = imu.begin_I2C(ISM330DHCX_ADDR, &Wire);
+    if (imuOk) {
+        imu.setAccelDataRate(LSM6DS_RATE_104_HZ);
+        imu.setGyroDataRate(LSM6DS_RATE_104_HZ);
+        imu.setAccelRange(LSM6DS_ACCEL_RANGE_4_G);
+        imu.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
+    }
+    Serial.print(F("ISM330DHCX:  "));
+    Serial.println(imuOk ? F("OK") : F("FAILED"));
+
+    batOk = battery.begin(&Wire);
+    if (batOk) {
+        delay(250);  // let SOC register update after wake
+        lastBatPct = battery.cellPercent();
+        lastBatRead = millis();
+    }
+    Serial.print(F("MAX17048:    "));
+    Serial.println(batOk ? F("OK") : F("FAILED"));
+    if (batOk) {
+        Serial.print(F("  Voltage:   ")); Serial.print(battery.cellVoltage(), 3); Serial.println(F(" V"));
+        Serial.print(F("  SOC:       ")); Serial.print(lastBatPct, 1); Serial.println(F(" %"));
+        Serial.print(F("  Hibernate: ")); Serial.println(battery.isHibernating() ? F("yes") : F("no"));
+    }
+
+    Serial.println();
+}
+
+static void initDisplay() {
+    dispOk = display.begin();
+    Serial.print(F("SH1107:      "));
+    Serial.println(dispOk ? F("OK") : F("FAILED"));
+
+    if (dispOk) {
+        display.showInitialisingMessage();
+        delay(500);
+        display.updateBattery(lastBatPct);
+        display.initScreen();
+    }
+
+    Serial.println();
+}
+
+static void initLaser() {
+    Serial1.begin(LASER_UART_BAUD_EGISMOS);
+    laserOk = laser.begin(Serial1);
+    Serial.print(F("Laser:       "));
+    Serial.println(laserOk ? F("OK (Egismos @ 9600)") : F("FAILED"));
+
+    // Buzzer disabled for debugging — skip init command
+
+    Serial.println();
+}
+
+static void initBle() {
+    bleOk = ble.begin();
+    Serial.print(F("BLE UART:    "));
+    Serial.println(bleOk ? F("OK (SERCOM1 @ 9600)") : F("FAILED"));
+
+    Serial.println();
+}
+
+static void initFlash() {
+    flashOk = configMgr.begin();
+    Serial.print(F("Flash/FS:    "));
+    Serial.println(flashOk ? F("OK") : F("FAILED (using defaults)"));
+
+    if (flashOk) {
+        if (configMgr.loadConfig(ctx.config)) {
+            Serial.println(F("  Config loaded from flash"));
+        } else {
+            Serial.println(F("  No saved config — using defaults"));
+        }
+
+        uint16_t pending = configMgr.countPendingReadings();
+        if (pending > 0) {
+            Serial.print(F("  Pending readings: "));
+            Serial.println(pending);
+            ctx.bleDisconnectionCounter = pending;
+        }
+
+        if (configMgr.hasFlag(Flags::CALIBRATION)) {
+            configMgr.clearFlag(Flags::CALIBRATION);
+            Serial.println(F("  ** Calibration mode flag detected"));
+            enterCalibMode = true;
+        }
+        if (configMgr.hasFlag(Flags::MENU)) {
+            configMgr.clearFlag(Flags::MENU);
+            Serial.println(F("  ** Menu mode flag detected"));
+            enterMenuMode = true;
+        }
+        if (configMgr.hasFlag(Flags::SNAKE)) {
+            configMgr.clearFlag(Flags::SNAKE);
+            Serial.println(F("  ** Snake mode flag detected"));
+        }
+    }
+
+    Serial.println();
+}
+
+static void initCalibration() {
+    Serial.print(F("Calibration: "));
+
+    bool loaded = false;
+
+    if (flashOk) {
+        char calBuf[1024];
+        size_t calLen = 0;
+        if (configMgr.loadCalibrationJson(calBuf, sizeof(calBuf), calLen)) {
+            loaded = calibration.fromJson(calBuf, calLen);
+            if (loaded) {
+                Serial.println(F("OK (from flash)"));
+            }
+        }
+    }
+
+    if (!loaded) {
+        loaded = calibration.fromJson(CALIBRATION_JSON, sizeof(CALIBRATION_JSON) - 1);
+        if (loaded) {
+            Serial.println(F("OK (from PROGMEM)"));
+        }
+    }
+
+    calOk = loaded;
+
+    if (calOk) {
+        Serial.print(F("  Mag axes:  ")); Serial.println(calibration.mag().axes().toString());
+        Serial.print(F("  Grav axes: ")); Serial.println(calibration.grav().axes().toString());
+        Serial.print(F("  Dip avg:   ")); Serial.print(calibration.dipAvg(), 1);
+        Serial.println(F(" deg"));
+
+        sensorMgr.init(&calibration, ctx.config.emaAlpha,
+                        ctx.config.stabilityBufferLength);
+        Serial.print(F("  Filter:    EMA alpha="));
+        Serial.print(ctx.config.emaAlpha, 2);
+        Serial.print(F(", stability buf="));
+        Serial.println(ctx.config.stabilityBufferLength);
+    } else {
+        Serial.println(F("FAILED — using raw angles"));
+    }
+
+    Serial.println();
+}
+
+static void initDisco() {
+    disco.begin();
+    Serial.println(F("NeoPixel:    OK"));
+    Serial.println();
+}
