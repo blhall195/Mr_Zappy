@@ -13,4 +13,11 @@ inline Eigen::Vector3f normalize(const Eigen::Vector3f& v) {
     return v / n;
 }
 
+/// Double-precision overload for fitting path
+inline Eigen::Vector3d normalized(const Eigen::Vector3d& v) {
+    double n = v.norm();
+    if (n < 1e-15) return Eigen::Vector3d::Zero();
+    return v / n;
+}
+
 } // namespace MagCal

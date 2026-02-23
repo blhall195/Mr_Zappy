@@ -8,6 +8,8 @@ namespace MagCal {
 
 static constexpr float RAD2DEG = 180.0f / M_PI;
 static constexpr float DEG2RAD = M_PI / 180.0f;
+static constexpr double RAD2DEG_D = 180.0 / M_PI;
+static constexpr double DEG2RAD_D = M_PI / 180.0;
 
 // C++14 requires out-of-line definition for ODR-used constexpr static members
 constexpr Strictness Calibration::DEFAULT_STRICTNESS;
@@ -197,41 +199,41 @@ float Calibration::fitNonLinearQuick(const PairedData& pairedData, int paramCoun
 
 float Calibration::accuracy(const PairedData& pairedData) const {
     // Port of Python calibration.py accuracy()
-    // Average std dev of orientation vectors in degrees
+    // Session 17: double-precision accumulators
     if (pairedData.empty()) return 0.0f;
 
-    float results = 0.0f;
+    double results = 0.0;
     for (const auto& pair : pairedData) {
         const auto& magSet = pair.first;
         const auto& gravSet = pair.second;
         int N = (int)magSet.size();
         if (N == 0) continue;
 
-        // Get orientation vectors for this set
-        std::vector<Eigen::Vector3f> orientations(N);
+        // Get orientation vectors for this set (float from runtime path, promote to double)
+        std::vector<Eigen::Vector3d> orientations(N);
         for (int i = 0; i < N; i++) {
-            orientations[i] = getOrientationVector(magSet[i], gravSet[i]);
+            orientations[i] = getOrientationVector(magSet[i], gravSet[i]).cast<double>();
         }
 
         // Compute mean
-        Eigen::Vector3f mean = Eigen::Vector3f::Zero();
+        Eigen::Vector3d mean = Eigen::Vector3d::Zero();
         for (int i = 0; i < N; i++) mean += orientations[i];
-        mean /= (float)N;
+        mean /= (double)N;
 
         // Compute std dev per axis
-        Eigen::Vector3f sumSqDiff = Eigen::Vector3f::Zero();
+        Eigen::Vector3d sumSqDiff = Eigen::Vector3d::Zero();
         for (int i = 0; i < N; i++) {
-            Eigen::Vector3f diff = orientations[i] - mean;
+            Eigen::Vector3d diff = orientations[i] - mean;
             sumSqDiff += diff.cwiseProduct(diff);
         }
-        Eigen::Vector3f stds;
+        Eigen::Vector3d stds;
         for (int j = 0; j < 3; j++) {
-            stds[j] = sqrtf(sumSqDiff[j] / (N - 1));  // ddof=1
+            stds[j] = sqrt(sumSqDiff[j] / (N - 1));  // ddof=1
         }
         results += stds.norm();
     }
 
-    return results / (float)pairedData.size() * RAD2DEG;
+    return (float)(results / (double)pairedData.size() * RAD2DEG_D);
 }
 
 std::pair<float, float> Calibration::uniformity(
@@ -248,14 +250,14 @@ void Calibration::setFieldCharacteristics(
     mag_.setExpectedFieldStrengths(magData);
     grav_.setExpectedFieldStrengths(gravData);
 
-    // Set expected mean dip
+    // Set expected mean dip (double accumulator)
     int N = (int)magData.size();
     if (N == 0) return;
-    float dipSum = 0.0f;
+    double dipSum = 0.0;
     for (int i = 0; i < N; i++) {
-        dipSum += getDip(magData[i], gravData[i]);
+        dipSum += (double)getDip(magData[i], gravData[i]);
     }
-    dipAvg_ = dipSum / (float)N;
+    dipAvg_ = (float)(dipSum / (double)N);
 }
 
 Eigen::Vector3f Calibration::getOrientationVector(
@@ -271,13 +273,14 @@ float Calibration::getDipBatch(
     const std::vector<Eigen::Vector3f>& magData,
     const std::vector<Eigen::Vector3f>& gravData) const
 {
+    // Session 17: double accumulator
     int N = (int)magData.size();
     if (N == 0) return 0.0f;
-    float sum = 0.0f;
+    double sum = 0.0;
     for (int i = 0; i < N; i++) {
-        sum += getDip(magData[i], gravData[i]);
+        sum += (double)getDip(magData[i], gravData[i]);
     }
-    return sum / (float)N;
+    return (float)(sum / (double)N);
 }
 
 std::vector<std::pair<int, int>> Calibration::findSimilarShots(
@@ -344,17 +347,19 @@ void Calibration::getRawAndExpectedMagData(
     std::vector<Eigen::Vector3f>& raw) const
 {
     // Port of Python calibration.py _get_raw_and_expected_mag_data()
+    // Session 17: double-precision rotation/averaging for numerical stability
     int N = (int)magSet.size();
-    std::vector<Eigen::Vector3f> rotatedMags(N);
-    std::vector<Eigen::Matrix3f> rotMats(N);
+    std::vector<Eigen::Vector3d> rotatedMags(N);
+    std::vector<Eigen::Matrix3d> rotMats(N);
+    std::vector<Eigen::Vector3d> rawD(N);
     raw.resize(N);
 
     for (int i = 0; i < N; i++) {
         Angles angles = getAngles(magSet[i], gravSet[i]);
-        float rollRad = angles.roll * DEG2RAD;
-        float c = cosf(rollRad), s = sinf(rollRad);
+        double rollRad = (double)angles.roll * DEG2RAD_D;
+        double c = cos(rollRad), s = sin(rollRad);
 
-        Eigen::Matrix3f rotMat;
+        Eigen::Matrix3d rotMat;
         rotMat << c, 0, s,
                   0, 1, 0,
                  -s, 0, c;
@@ -362,21 +367,25 @@ void Calibration::getRawAndExpectedMagData(
 
         Eigen::Vector3f rawMag = mag_.apply(magSet[i]);
         raw[i] = rawMag;
+        rawD[i] = rawMag.cast<double>();
 
         // Python: rotated_mag = np.dot(raw_mag.reshape((1,3)), rot_mat.transpose())
-        rotatedMags[i] = rotMat.transpose() * rawMag;
+        // numpy row @ M^T  →  Eigen: (M^T)^T * col = M * col
+        rotatedMags[i] = rotMat * rawD[i];
     }
 
     // Average of rotated vectors
-    Eigen::Vector3f avgVec = Eigen::Vector3f::Zero();
+    Eigen::Vector3d avgVec = Eigen::Vector3d::Zero();
     for (int i = 0; i < N; i++) avgVec += rotatedMags[i];
-    avgVec /= (float)N;
+    avgVec /= (double)N;
 
     // Rotate average back for each measurement
     expected.resize(N);
     for (int i = 0; i < N; i++) {
         // Python: expected = np.dot(average_vector.reshape((1,3)), rot_mat)
-        expected[i] = rotMats[i] * avgVec;
+        // numpy row @ M  →  Eigen: M^T * col
+        Eigen::Vector3d expD = rotMats[i].transpose() * avgVec;
+        expected[i] = expD.cast<float>();
     }
 }
 
@@ -386,12 +395,13 @@ std::vector<float> Calibration::getLstsqNonLinearParams(
     const std::vector<Eigen::Vector3f>& rawMags) const
 {
     // Port of Python calibration.py _get_lstsq_non_linear_params()
+    // Session 17: double-precision least-squares solve
     int N = (int)expectedMags.size();
     int cols = paramCount * 2;  // X and Z axes only
 
-    // Build least-squares matrices
-    Eigen::MatrixXf inputData(N * 2, cols);
-    Eigen::VectorXf outputData(N * 2);
+    // Build least-squares matrices in double precision
+    Eigen::MatrixXd inputData(N * 2, cols);
+    Eigen::VectorXd outputData(N * 2);
     inputData.setZero();
 
     // Create a dummy RBF to get Gaussian basis functions
@@ -399,20 +409,18 @@ std::vector<float> Calibration::getLstsqNonLinearParams(
     RBF dummyRbf;
     dummyRbf.init(zeroParams.data(), paramCount);
 
-    float gaussBuf[RBF::MAX_PARAMS];
+    double gaussBuf[RBF::MAX_PARAMS];
 
     for (int i = 0; i < N; i++) {
-        Eigen::Vector3f diff = expectedMags[i] - rawMags[i];
+        Eigen::Vector3d diff = expectedMags[i].cast<double>() - rawMags[i].cast<double>();
 
-        // Get Gaussian basis for each axis of raw reading
-        // Python: factors = rbf.get_gaussians(raw).transpose()
-        // We need factors for X (index 0) and Z (index 2)
-        dummyRbf.getGaussians(rawMags[i][0], gaussBuf);
+        // Get Gaussian basis for each axis of raw reading (double overload)
+        dummyRbf.getGaussians((double)rawMags[i][0], gaussBuf);
         for (int j = 0; j < paramCount; j++) {
             inputData(i * 2, j) = gaussBuf[j];                // X axis → first paramCount cols
         }
 
-        dummyRbf.getGaussians(rawMags[i][2], gaussBuf);
+        dummyRbf.getGaussians((double)rawMags[i][2], gaussBuf);
         for (int j = 0; j < paramCount; j++) {
             inputData(i * 2 + 1, paramCount + j) = gaussBuf[j]; // Z axis → last paramCount cols
         }
@@ -421,18 +429,23 @@ std::vector<float> Calibration::getLstsqNonLinearParams(
         outputData[i * 2 + 1] = diff[2];  // Z component
     }
 
-    // Solve least squares
-    Eigen::VectorXf params = inputData.colPivHouseholderQr().solve(outputData);
+    // Solve least squares in double
+    Eigen::VectorXd params = inputData.colPivHouseholderQr().solve(outputData);
 
-    return std::vector<float>(params.data(), params.data() + cols);
+    // Cast results back to float for RBF storage
+    std::vector<float> result(cols);
+    for (int i = 0; i < cols; i++) {
+        result[i] = (float)params[i];
+    }
+    return result;
 }
 
 // ── Roll alignment (port of calibrate_roll.py) ──────────────────────
 
-/// Build rotation matrix along axis with sin(s) and cos(c)
-static Eigen::Matrix3f rot3Dsc(float s, float c, int ax) {
-    Eigen::Matrix3f rot = Eigen::Matrix3f::Zero();
-    rot(ax, ax) = 1.0f;
+/// Build rotation matrix along axis with sin(s) and cos(c) — double precision
+static Eigen::Matrix3d rot3Dsc(double s, double c, int ax) {
+    Eigen::Matrix3d rot = Eigen::Matrix3d::Zero();
+    rot(ax, ax) = 1.0;
     int axp = (ax > 0) ? ax - 1 : 2;
     int axn = (ax < 2) ? ax + 1 : 0;
     rot(axp, axp) = c;
@@ -447,13 +460,14 @@ void Calibration::alignSensorRoll(
     const std::vector<Eigen::Vector3f>& gravData)
 {
     // Port of calibrate_roll.py: calib_fit_rotM_cstdip + align_sensor_roll
+    // Session 17: double-precision fitting
     int N = (int)magData.size();
 
-    // Apply calibration to all data
-    std::vector<Eigen::Vector3f> mcorr(N), gcorr(N);
+    // Apply calibration to all data and promote to double
+    std::vector<Eigen::Vector3d> mcorr(N), gcorr(N);
     for (int i = 0; i < N; i++) {
-        mcorr[i] = mag_.apply(magData[i]);
-        gcorr[i] = grav_.apply(gravData[i]);
+        mcorr[i] = mag_.apply(magData[i]).cast<double>();
+        gcorr[i] = grav_.apply(gravData[i]).cast<double>();
     }
 
     // calib_fit_rotM_cstdip with axis=1 (Y axis)
@@ -462,48 +476,45 @@ void Calibration::alignSensorRoll(
     if (axis == 0)      { oa0 = 1; oa1 = 2; }
     else if (axis == 1) { oa0 = 0; oa1 = 2; }
     else                { oa0 = 0; oa1 = 1; }
-    const float signs[] = {1.0f, -1.0f, -1.0f};
+    const double signs[] = {1.0, -1.0, -1.0};
 
-    Eigen::Matrix3f rot = Eigen::Matrix3f::Identity();
-    float prevrotsin = -1.0f;
+    Eigen::Matrix3d rot = Eigen::Matrix3d::Identity();
+    double prevrotsin = -1.0;
 
     for (int it = 0; it < 3; it++) {
-        // m = rot * mcorr^T → then transpose back
-        // For each sample: m[i] = rot * mcorr[i]
-        Eigen::VectorXf xb(N);
-        Eigen::VectorXf xa(N);
+        Eigen::VectorXd xb(N);
+        Eigen::VectorXd xa(N);
 
         for (int i = 0; i < N; i++) {
-            Eigen::Vector3f m = rot * mcorr[i];
-            // xb = sum(m * gcorr, axis=-1) = dot product
+            Eigen::Vector3d m = rot * mcorr[i];
             xb[i] = m.dot(gcorr[i]);
-            // xa = m[oa0]*g[oa1] - m[oa1]*g[oa0]
             xa[i] = m[oa0] * gcorr[i][oa1] - m[oa1] * gcorr[i][oa0];
         }
 
         // Build design matrix D = [xa, ones]
-        Eigen::MatrixXf D(N, 2);
+        Eigen::MatrixXd D(N, 2);
         for (int i = 0; i < N; i++) {
             D(i, 0) = xa[i];
-            D(i, 1) = 1.0f;
+            D(i, 1) = 1.0;
         }
 
         // Solve D * coeffs = xb
-        Eigen::Vector2f coeffs = D.colPivHouseholderQr().solve(xb);
-        float s = coeffs[0];
+        Eigen::Vector2d coeffs = D.colPivHouseholderQr().solve(xb);
+        double s = coeffs[0];
 
-        if (prevrotsin >= 0.0f && fabsf(s) > prevrotsin) {
+        if (prevrotsin >= 0.0 && fabs(s) > prevrotsin) {
             break;  // rotation should decrease each iteration
         }
-        prevrotsin = fabsf(s);
+        prevrotsin = fabs(s);
 
-        float c = sqrtf(1.0f - s * s);
+        double c = sqrt(1.0 - s * s);
         rot = rot * rot3Dsc(signs[axis] * s, c, axis);
     }
 
     // Apply roll correction: mag.transform = mag.transform * rot^T
-    // Python: self.mag.transform = np.dot(self.mag.transform, rot.transpose())
-    mag_.transformRef() = mag_.transform() * rot.transpose();
+    // Compute in double, store back as float
+    Eigen::Matrix3d transformD = mag_.transform().cast<double>();
+    mag_.transformRef() = (transformD * rot.transpose()).cast<float>();
 }
 
 } // namespace MagCal

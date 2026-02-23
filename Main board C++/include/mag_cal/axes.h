@@ -14,6 +14,9 @@ public:
     /// Transform a single reading from sensor coords to device coords
     Eigen::Vector3f fixAxes(const Eigen::Vector3f& data) const;
 
+    /// Double-precision overload for fitting path
+    Eigen::Vector3d fixAxes(const Eigen::Vector3d& data) const;
+
     /// Return axis string representation (e.g. "-X-Y-Z")
     const char* toString() const { return str_; }
 

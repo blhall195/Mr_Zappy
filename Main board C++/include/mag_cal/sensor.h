@@ -82,10 +82,12 @@ private:
     // ── Fitting helpers ──
 
     /// Fit a plane to calibrated data points. Returns plane normal (unit vector).
-    Eigen::Vector3f findPlane(const std::vector<Eigen::Vector3f>& data) const;
+    /// Session 17: returns double for fitting precision
+    Eigen::Vector3d findPlane(const std::vector<Eigen::Vector3f>& data) const;
 
     /// Rotate transform so that points along vector land on the given axis.
-    void alignToVector(const Eigen::Vector3f& vector, char axis);
+    /// Session 17: takes double vector for fitting precision
+    void alignToVector(const Eigen::Vector3d& vector, char axis);
 };
 
 } // namespace MagCal

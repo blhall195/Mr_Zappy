@@ -36,4 +36,11 @@ void RBF::getGaussians(float x, float* out) const {
     }
 }
 
+void RBF::getGaussians(double x, double* out) const {
+    for (int i = 0; i < paramCount_; i++) {
+        double dist = (x - (double)offsets_[i]) / (double)epsilon_;
+        out[i] = exp(-dist * dist);
+    }
+}
+
 } // namespace MagCal

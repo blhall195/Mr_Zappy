@@ -22,6 +22,9 @@ public:
     /// out must have room for paramCount_ elements
     void getGaussians(float x, float* out) const;
 
+    /// Double-precision overload for fitting path
+    void getGaussians(double x, double* out) const;
+
     int paramCount() const { return paramCount_; }
     bool isValid() const { return paramCount_ > 0; }
     const float* params() const { return params_; }
