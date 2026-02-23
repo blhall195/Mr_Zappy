@@ -31,4 +31,12 @@ Eigen::Vector3f Axes::fixAxes(const Eigen::Vector3f& data) const {
     );
 }
 
+Eigen::Vector3d Axes::fixAxes(const Eigen::Vector3d& data) const {
+    return Eigen::Vector3d(
+        data[indices_[0]] * polarities_[0],
+        data[indices_[1]] * polarities_[1],
+        data[indices_[2]] * polarities_[2]
+    );
+}
+
 } // namespace MagCal

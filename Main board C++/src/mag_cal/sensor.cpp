@@ -164,76 +164,82 @@ void Sensor::toJson(JsonObject dict) const {
 
 float Sensor::fitEllipsoid(const std::vector<Eigen::Vector3f>& data) {
     // Port of Python sensor.py fit_ellipsoid()
+    // Session 17: double-precision fitting for numerical stability
     // Fit ax² + by² + cz² + 2dxy + 2exz + 2fyz + 2gx + 2hy + 2iz = 1
     const int N = (int)data.size();
 
-    // Fix axes on all data
-    std::vector<Eigen::Vector3f> fixed(N);
+    // Fix axes on all data (promote to double)
+    std::vector<Eigen::Vector3d> fixed(N);
     for (int i = 0; i < N; i++) {
-        fixed[i] = axes_.fixAxes(data[i]);
+        Eigen::Vector3d v = data[i].cast<double>();
+        fixed[i] = axes_.fixAxes(v);
     }
 
     // Build (N, 9) design matrix and (N, 1) output vector of ones
-    Eigen::MatrixXf A(N, 9);
-    Eigen::VectorXf b = Eigen::VectorXf::Ones(N);
+    Eigen::MatrixXd A(N, 9);
+    Eigen::VectorXd b = Eigen::VectorXd::Ones(N);
 
     for (int i = 0; i < N; i++) {
-        float x = fixed[i][0], y = fixed[i][1], z = fixed[i][2];
+        double x = fixed[i][0], y = fixed[i][1], z = fixed[i][2];
         A(i, 0) = x * x;
         A(i, 1) = y * y;
         A(i, 2) = z * z;
-        A(i, 3) = 2.0f * x * y;
-        A(i, 4) = 2.0f * x * z;
-        A(i, 5) = 2.0f * y * z;
-        A(i, 6) = 2.0f * x;
-        A(i, 7) = 2.0f * y;
-        A(i, 8) = 2.0f * z;
+        A(i, 3) = 2.0 * x * y;
+        A(i, 4) = 2.0 * x * z;
+        A(i, 5) = 2.0 * y * z;
+        A(i, 6) = 2.0 * x;
+        A(i, 7) = 2.0 * y;
+        A(i, 8) = 2.0 * z;
     }
 
     // Solve least squares: A * coeff = b
-    Eigen::VectorXf coeff = A.colPivHouseholderQr().solve(b);
+    Eigen::VectorXd coeff = A.colPivHouseholderQr().solve(b);
 
-    float a = coeff[0], bv = coeff[1], c = coeff[2];
-    float d = coeff[3], e = coeff[4], f = coeff[5];
-    float g = coeff[6], h = coeff[7], iv = coeff[8];
+    double a = coeff[0], bv = coeff[1], c = coeff[2];
+    double d = coeff[3], e = coeff[4], f = coeff[5];
+    double g = coeff[6], h = coeff[7], iv = coeff[8];
 
     // Build 4x4 matrix A4
-    Eigen::Matrix4f A4;
+    Eigen::Matrix4d A4;
     A4 << a,  d,  e,  g,
           d,  bv, f,  h,
           e,  f,  c,  iv,
-          g,  h,  iv, -1.0f;
+          g,  h,  iv, -1.0;
 
     // Extract A3 (3x3 upper-left)
-    Eigen::Matrix3f A3 = A4.block<3, 3>(0, 0);
+    Eigen::Matrix3d A3 = A4.block<3, 3>(0, 0);
 
     // Compute centre: solve A3 * centre = [-g, -h, -i]
-    Eigen::Vector3f rhs(-g, -h, -iv);
-    centre_ = A3.colPivHouseholderQr().solve(rhs);
+    Eigen::Vector3d rhs(-g, -h, -iv);
+    Eigen::Vector3d centreD = A3.colPivHouseholderQr().solve(rhs);
 
     // Build T matrix for similarity transform
-    Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
-    T(3, 0) = centre_[0];
-    T(3, 1) = centre_[1];
-    T(3, 2) = centre_[2];
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+    T(3, 0) = centreD[0];
+    T(3, 1) = centreD[1];
+    T(3, 2) = centreD[2];
 
     // B4 = T * A4 * T^T
-    Eigen::Matrix4f B4 = T * A4 * T.transpose();
+    Eigen::Matrix4d B4 = T * A4 * T.transpose();
 
     // B3 = B4[0:3,0:3] / -B4[3,3]
-    Eigen::Matrix3f B3 = B4.block<3, 3>(0, 0) / (-B4(3, 3));
+    Eigen::Matrix3d B3 = B4.block<3, 3>(0, 0) / (-B4(3, 3));
 
     // Eigendecomposition of B3 (symmetric positive definite)
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(B3);
-    Eigen::Vector3f eigenValues = solver.eigenvalues();
-    Eigen::Matrix3f eigenVectors = solver.eigenvectors();
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(B3);
+    Eigen::Vector3d eigenValues = solver.eigenvalues();
+    Eigen::Matrix3d eigenVectors = solver.eigenvectors();
 
     // transform = V * sqrt(diag(eigenvalues)) * V^T
-    Eigen::Matrix3f sqrtDiag = Eigen::Matrix3f::Zero();
+    Eigen::Matrix3d sqrtDiag = Eigen::Matrix3d::Zero();
     for (int i = 0; i < 3; i++) {
-        sqrtDiag(i, i) = sqrtf(fabsf(eigenValues[i]));
+        sqrtDiag(i, i) = sqrt(fabs(eigenValues[i]));
     }
-    transform_ = eigenVectors * sqrtDiag * eigenVectors.transpose();
+    Eigen::Matrix3d transformD = eigenVectors * sqrtDiag * eigenVectors.transpose();
+
+    // Store results back as float for runtime path
+    transform_ = transformD.cast<float>();
+    centre_ = centreD.cast<float>();
 
     calibrated_ = true;
     hasRbfs_ = false;
@@ -244,17 +250,18 @@ float Sensor::fitEllipsoid(const std::vector<Eigen::Vector3f>& data) {
 void Sensor::alignAlongAxis(const std::vector<std::vector<Eigen::Vector3f>>& datasets,
                             char axis) {
     // Port of Python sensor.py align_along_axis()
+    // Session 17: double-precision fitting
     int axisIdx = -1;
     if (axis == 'X') axisIdx = 0;
     else if (axis == 'Y') axisIdx = 1;
     else if (axis == 'Z') axisIdx = 2;
     if (axisIdx < 0) return;
 
-    Eigen::Vector3f result = Eigen::Vector3f::Zero();
+    Eigen::Vector3d result = Eigen::Vector3d::Zero();
 
     for (const auto& points : datasets) {
-        Eigen::Vector3f vec = findPlane(points);
-        if (vec[axisIdx] < 0.0f) {
+        Eigen::Vector3d vec = findPlane(points);
+        if (vec[axisIdx] < 0.0) {
             vec = -vec;
         }
         result += vec;
@@ -263,55 +270,57 @@ void Sensor::alignAlongAxis(const std::vector<std::vector<Eigen::Vector3f>>& dat
     alignToVector(result, axis);
 }
 
-Eigen::Vector3f Sensor::findPlane(const std::vector<Eigen::Vector3f>& data) const {
+Eigen::Vector3d Sensor::findPlane(const std::vector<Eigen::Vector3f>& data) const {
     // Port of Python sensor.py _find_plane()
-    // Apply calibration to data, then solve: calibrated * normal = 1
+    // Session 17: double-precision fitting
     const int N = (int)data.size();
-    Eigen::MatrixXf A(N, 3);
-    Eigen::VectorXf b = Eigen::VectorXf::Ones(N);
+    Eigen::MatrixXd A(N, 3);
+    Eigen::VectorXd b = Eigen::VectorXd::Ones(N);
 
     for (int i = 0; i < N; i++) {
         Eigen::Vector3f cal = apply(data[i]);
-        A(i, 0) = cal[0];
-        A(i, 1) = cal[1];
-        A(i, 2) = cal[2];
+        A(i, 0) = (double)cal[0];
+        A(i, 1) = (double)cal[1];
+        A(i, 2) = (double)cal[2];
     }
 
-    Eigen::Vector3f normal = A.colPivHouseholderQr().solve(b);
-    return normalize(normal);
+    Eigen::Vector3d normal = A.colPivHouseholderQr().solve(b);
+    return normalized(normal);
 }
 
-void Sensor::alignToVector(const Eigen::Vector3f& vector, char axis) {
+void Sensor::alignToVector(const Eigen::Vector3d& vector, char axis) {
     // Port of Python sensor.py _align_to_vector()
-    // Build orthonormal basis with one axis aligned to the given vector
-    Eigen::Vector3f vx, vy, vz;
+    // Session 17: double-precision fitting
+    Eigen::Vector3d vx, vy, vz;
 
     if (axis == 'X') {
         vx = vector;
-        vz = normalize(vx.cross(Eigen::Vector3f(0, 1, 0)));
-        vy = normalize(vz.cross(vx));
+        vz = normalized(vx.cross(Eigen::Vector3d(0, 1, 0)));
+        vy = normalized(vz.cross(vx));
     } else if (axis == 'Y') {
         vy = vector;
-        vx = normalize(vy.cross(Eigen::Vector3f(0, 0, 1)));
-        vz = normalize(vx.cross(vy));
+        vx = normalized(vy.cross(Eigen::Vector3d(0, 0, 1)));
+        vz = normalized(vx.cross(vy));
     } else { // Z
         vz = vector;
-        vy = normalize(vz.cross(Eigen::Vector3f(1, 0, 0)));
-        vx = normalize(vy.cross(vz));
+        vy = normalized(vz.cross(Eigen::Vector3d(1, 0, 0)));
+        vx = normalized(vy.cross(vz));
     }
 
-    vx = normalize(vx);
-    vy = normalize(vy);
-    vz = normalize(vz);
+    vx = normalized(vx);
+    vy = normalized(vy);
+    vz = normalized(vz);
 
     // mat = [vx; vy; vz] as rows → (3,3)
-    Eigen::Matrix3f mat;
+    Eigen::Matrix3d mat;
     mat.row(0) = vx;
     mat.row(1) = vy;
     mat.row(2) = vz;
 
     // Python: self.transform = np.dot(mat.transpose(), self.transform)
-    transform_ = mat.transpose() * transform_;
+    // Compute in double, store back as float
+    Eigen::Matrix3d transformD = transform_.cast<double>();
+    transform_ = (mat.transpose() * transformD).cast<float>();
 }
 
 void Sensor::setNonLinearParams(const float* params, int totalCount) {
@@ -343,38 +352,40 @@ void Sensor::setLinear() {
 
 float Sensor::uniformity(const std::vector<Eigen::Vector3f>& data) const {
     // Port of Python sensor.py uniformity()
-    // Std dev of radii after calibration (mean should be ~1.0)
+    // Session 17: double accumulator for numerical stability
     const int N = (int)data.size();
     if (N == 0) return 0.0f;
 
-    float sumSqDiff = 0.0f;
+    double sumSqDiff = 0.0;
     for (int i = 0; i < N; i++) {
-        float radius = apply(data[i]).norm();
-        float diff = radius - 1.0f;
+        double radius = (double)apply(data[i]).norm();
+        double diff = radius - 1.0;
         sumSqDiff += diff * diff;
     }
-    return sqrtf(sumSqDiff / N);
+    return (float)sqrt(sumSqDiff / N);
 }
 
 void Sensor::setExpectedFieldStrengths(const std::vector<Eigen::Vector3f>& data) {
     // Port of Python sensor.py set_expected_field_strengths()
+    // Session 17: double accumulator for numerical stability
     const int N = (int)data.size();
     if (N == 0) return;
 
-    float sum = 0.0f;
-    std::vector<float> strengths(N);
+    double sum = 0.0;
+    std::vector<double> strengths(N);
     for (int i = 0; i < N; i++) {
-        strengths[i] = getFieldStrength(data[i]);
+        strengths[i] = (double)getFieldStrength(data[i]);
         sum += strengths[i];
     }
-    fieldAvg_ = sum / N;
+    double avg = sum / N;
+    fieldAvg_ = (float)avg;
 
-    float sumSqDiff = 0.0f;
+    double sumSqDiff = 0.0;
     for (int i = 0; i < N; i++) {
-        float diff = strengths[i] - fieldAvg_;
+        double diff = strengths[i] - avg;
         sumSqDiff += diff * diff;
     }
-    fieldStd_ = sqrtf(sumSqDiff / N);
+    fieldStd_ = (float)sqrt(sumSqDiff / N);
 }
 
 } // namespace MagCal

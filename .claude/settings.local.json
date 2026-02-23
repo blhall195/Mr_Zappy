@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command:*)",
+      "Bash(powershell.exe -NoProfile -Command:*)",
+      "Bash(export PATH=\"$HOME/.platformio/penv/Scripts:$HOME/.platformio/penv/bin:$PATH\")",
+      "Bash(pio:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(dir:*)",
+      "Bash(~/.platformio/penv/Scripts/platformio.exe run:*)",
+      "Bash(timeout 20 ~/.platformio/penv/Scripts/platformio.exe device monitor:*)",
+      "Bash(~/.platformio/penv/Scripts/pio run:*)",
+      "Bash(timeout 30 ~/.platformio/penv/Scripts/pio device monitor:*)",
+      "Bash(timeout 15 ~/.platformio/penv/Scripts/pio device monitor:*)",
+      "Bash(timeout 20 ~/.platformio/penv/Scripts/pio device monitor:*)",
+      "Bash(~/.platformio/penv/Scripts/platformio.exe device monitor:*)",
+      "Bash(~/.platformio/penv/Scripts/pio device list:*)",
+      "Bash(python3:*)",
+      "Bash(~/.platformio/penv/Scripts/pio device monitor:*)",
+      "Bash(~/.platformio/penv/Scripts/pio.exe run:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git rm:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}
