@@ -19,7 +19,7 @@
 enum class CalibState : uint8_t {
     INACTIVE,               // not in calibration mode
     CHOOSING,               // waiting for user to pick ellipsoid or alignment
-    COLLECTING_ELLIPSOID,   // continuous auto-collection ellipsoid
+    COLLECTING_ELLIPSOID,   // 56-point ellipsoid collection
     COLLECTING_ALIGNMENT,   // 24-point alignment collection (3 stages × 8)
     CALCULATING,            // running fitting math
     SHOW_RESULTS,           // displaying accuracy, waiting for save/discard
@@ -58,33 +58,21 @@ private:
     std::vector<Eigen::Vector3f> magArray_;
     std::vector<Eigen::Vector3f> gravArray_;
 
-    // Rolling 3-sample consistency buffer (lighter for continuous collection)
-    static constexpr int BUFFER_SIZE = 3;
+    // Rolling 8-sample consistency buffer
+    static constexpr int BUFFER_SIZE = 8;
     Eigen::Vector3f magBuffer_[BUFFER_SIZE];
     Eigen::Vector3f gravBuffer_[BUFFER_SIZE];
     int bufferCount_ = 0;
     int bufferIdx_   = 0;   // circular write index
 
-    // Alignment mode still uses button-press flow
     bool waitingForStable_ = false;
     int iteration_ = 0;
-    int targetCount_ = 24;  // only used for alignment (24 pts)
-    int maxCount_ = 200;    // max ellipsoid points (RAM budget)
-
-    // ── Continuous ellipsoid collection ──
-    static constexpr float MIN_ANGULAR_DIST = 10.0f;  // degrees — novelty gate
-    static constexpr float ELLIPSOID_MAG_THRESH = 1.0f;   // µT stability (relaxed)
-    static constexpr float ELLIPSOID_GRAV_THRESH = 0.3f;  // m/s² stability (relaxed)
-    static constexpr int AUTO_COMPLETE_ZONES = 20;    // of 32 — auto-advance
-    static constexpr int AUTO_COMPLETE_POINTS = 60;
-    static constexpr int EARLY_FINISH_ZONES = 16;     // of 32 — Button 1 early
-    static constexpr int EARLY_FINISH_POINTS = 40;
+    int targetCount_ = 56;  // 56 for ellipsoid, 24 for alignment
 
     // ── Coverage bar (ellipsoid only) ──
     static constexpr int COV_COLS = 8;
     static constexpr int COV_ROWS = 4;
-    static constexpr int ZONE_COVERED_THRESHOLD = 2;  // points per zone to count as covered
-    uint8_t zoneCounts_[COV_ROWS][COV_COLS];
+    bool coverageZones_[COV_ROWS][COV_COLS];
 
     // ── Save/discard hold detection ──
     float holdCounter_ = 0.0f;
@@ -100,13 +88,10 @@ private:
     uint32_t lastSampleTime_ = 0;
     uint32_t beepEndTime_ = 0;
     bool beepActive_ = false;
-    uint32_t purpleFlashEnd_ = 0;  // purple LED held until this time
 
     // ── State handlers ──
     void updateChoosing();
     void updateCollecting();
-    void updateCollectingEllipsoid();
-    void updateCollectingAlignment();
     void updateCalculating();
     void updateShowResults();
     void updateSaving();
@@ -116,9 +101,7 @@ private:
     bool isConsistent(const Eigen::Vector3f* buffer, int count, float threshold) const;
     Eigen::Vector3f average(const Eigen::Vector3f* buffer, int count) const;
     void recordPoint(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav);
-    void updateCoverageZone(const Eigen::Vector3f& grav);
-    bool isNovel(const Eigen::Vector3f& mag) const;
-    int coveredZoneCount() const;
+    void updateCoverageBar(const Eigen::Vector3f& grav);
 
     // ── Display helpers ──
     void showChoiceScreen();

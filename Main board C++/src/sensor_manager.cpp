@@ -10,9 +10,6 @@ void SensorManager::init(const MagCal::Calibration* cal,
     stabLen_   = (stabilityLen > MAX_STAB_BUF) ? MAX_STAB_BUF : stabilityLen;
     resetStability();
 
-    filtGrav_   = Eigen::Vector3f(0.0f, 0.0f, 9.81f);
-    gyroBias_   = Eigen::Vector3f::Zero();
-    seeded_     = false;
     emaSeeded_  = false;
     emaAz_      = 0.0f;
     emaInc_     = 0.0f;
@@ -22,20 +19,15 @@ void SensorManager::init(const MagCal::Calibration* cal,
 // ── Main update ─────────────────────────────────────────────────────
 
 void SensorManager::update(const Eigen::Vector3f& rawMag,
-                           const Eigen::Vector3f& rawAccel,
-                           const Eigen::Vector3f& rawGyro,
-                           float dt) {
-    if (!cal_ || dt <= 0.0f) return;
+                           const Eigen::Vector3f& rawAccel) {
+    if (!cal_) return;
 
-    // 1) Complementary filter: smooth the gravity vector using gyro
-    complementaryGravFilter(rawAccel, rawGyro, dt);
-
-    // 2) Compute angles directly from calibrated mag + filtered gravity
+    // 1) Compute angles directly from calibrated mag + raw accel
     //    calibration.getAngles() does: axis remap, ellipsoid correction,
     //    orientation matrix, ZXY Euler extraction
-    MagCal::Angles a = cal_->getAngles(rawMag, filtGrav_);
+    MagCal::Angles a = cal_->getAngles(rawMag, rawAccel);
 
-    // 3) EMA smooth the output angles
+    // 2) EMA smooth the output angles
     if (!emaSeeded_) {
         emaAz_  = a.azimuth;
         emaInc_ = a.inclination;
@@ -47,64 +39,8 @@ void SensorManager::update(const Eigen::Vector3f& rawMag,
         roll_   = a.roll;  // roll not smoothed (matches Python)
     }
 
-    // 4) Push into stability ring buffer
+    // 3) Push into stability ring buffer
     pushStability(emaAz_, emaInc_);
-}
-
-// ── Complementary gravity filter ────────────────────────────────────
-// Gyro predicts gravity rotation, accelerometer corrects.
-// Dynamic alpha: when still, trust gyro prediction; when moving, trust accel.
-// Matches Python sensor_manager.py get_grav().
-
-void SensorManager::complementaryGravFilter(const Eigen::Vector3f& rawAccel,
-                                             const Eigen::Vector3f& rawGyro,
-                                             float dt) {
-    // Seed on first call
-    if (!seeded_) {
-        filtGrav_ = rawAccel;
-        seeded_ = true;
-        return;
-    }
-
-    // Subtract estimated gyro bias
-    float wx = rawGyro.x() - gyroBias_.x();
-    float wy = rawGyro.y() - gyroBias_.y();
-    float wz = rawGyro.z() - gyroBias_.z();
-
-    // Gyro magnitude (for dynamic alpha + bias learning)
-    float gyroMag = sqrtf(wx * wx + wy * wy + wz * wz);
-
-    // Gyro-predict: rotate previous gravity estimate by angular velocity
-    // v_new ≈ v + (omega × v) * dt
-    float gx = filtGrav_.x();
-    float gy = filtGrav_.y();
-    float gz = filtGrav_.z();
-    float predX = gx + (wy * gz - wz * gy) * dt;
-    float predY = gy + (wz * gx - wx * gz) * dt;
-    float predZ = gz + (wx * gy - wy * gx) * dt;
-
-    // Dynamic alpha based on gyro magnitude
-    float alpha;
-    if (gyroMag <= GYRO_THRESH_LOW) {
-        alpha = ALPHA_LOW;
-    } else if (gyroMag >= GYRO_THRESH_HIGH) {
-        alpha = ALPHA_HIGH;
-    } else {
-        float t = (gyroMag - GYRO_THRESH_LOW) / (GYRO_THRESH_HIGH - GYRO_THRESH_LOW);
-        alpha = ALPHA_LOW + t * (ALPHA_HIGH - ALPHA_LOW);
-    }
-
-    // Blend: alpha * raw_accel + (1 - alpha) * gyro_prediction
-    filtGrav_.x() = alpha * rawAccel.x() + (1.0f - alpha) * predX;
-    filtGrav_.y() = alpha * rawAccel.y() + (1.0f - alpha) * predY;
-    filtGrav_.z() = alpha * rawAccel.z() + (1.0f - alpha) * predZ;
-
-    // Online gyro bias learning when stationary
-    if (gyroMag <= GYRO_THRESH_LOW) {
-        gyroBias_.x() += BIAS_LEARN_RATE * (rawGyro.x() - gyroBias_.x());
-        gyroBias_.y() += BIAS_LEARN_RATE * (rawGyro.y() - gyroBias_.y());
-        gyroBias_.z() += BIAS_LEARN_RATE * (rawGyro.z() - gyroBias_.z());
-    }
 }
 
 // ── Circular EMA for azimuth ────────────────────────────────────────
