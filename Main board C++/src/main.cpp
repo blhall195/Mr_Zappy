@@ -95,12 +95,10 @@ static bool enterCalibMode = false;
 // Latest sensor readings
 static float lastMagX = 0, lastMagY = 0, lastMagZ = 0;
 static float lastAccX = 0, lastAccY = 0, lastAccZ = 0;
-static float lastGyrX = 0, lastGyrY = 0, lastGyrZ = 0;
 
 static float lastDistance = 0;
 
 // ── Timing statics ──────────────────────────────────────────────────
-static uint32_t lastSensorTime      = 0;
 static uint32_t lastSensorUpdate    = 0;
 static uint32_t lastBatRead         = 0;
 static float    lastBatPct          = 0.0f;
@@ -243,7 +241,6 @@ void setup() {
     }
 
     ctx.lastActivityTime = millis();
-    lastSensorTime = millis();
 
     if (calMode.isActive()) {
         Serial.println(F("Running. Calibration mode."));
@@ -356,8 +353,6 @@ void loop() {
 static void readSensorsUpdate(uint32_t now) {
     if (now - lastSensorUpdate < Timing::SENSOR_POLL_MS) return;
 
-    float dt = (now - lastSensorTime) * 0.001f;
-    lastSensorTime = now;
     lastSensorUpdate = now;
 
     if (magOk) {
@@ -371,16 +366,12 @@ static void readSensorsUpdate(uint32_t now) {
         lastAccX = accel.acceleration.x;
         lastAccY = accel.acceleration.y;
         lastAccZ = accel.acceleration.z;
-        lastGyrX = gyro.gyro.x;
-        lastGyrY = gyro.gyro.y;
-        lastGyrZ = gyro.gyro.z;
     }
 
     if (calOk && magOk && imuOk) {
         Eigen::Vector3f rawMag(lastMagX, lastMagY, lastMagZ);
         Eigen::Vector3f rawGrav(lastAccX, lastAccY, lastAccZ);
-        Eigen::Vector3f rawGyro(lastGyrX, lastGyrY, lastGyrZ);
-        sensorMgr.update(rawMag, rawGrav, rawGyro, dt);
+        sensorMgr.update(rawMag, rawGrav);
     }
 }
 

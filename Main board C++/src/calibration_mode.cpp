@@ -30,7 +30,7 @@ void CalibrationMode::begin(
     resultGravAcc_ = 0.0f;
     resultAccuracy_ = 0.0f;
 
-    memset(zoneCounts_, 0, sizeof(zoneCounts_));
+    memset(coverageZones_, 0, sizeof(coverageZones_));
 
     // Turn on laser for calibration
     laser_->setLaser(true);
@@ -39,7 +39,7 @@ void CalibrationMode::begin(
     showChoiceScreen();
 
     Serial.println(F("Calibration mode entered."));
-    Serial.println(F("  MEASURE = Ellipsoid (auto)"));
+    Serial.println(F("  MEASURE = Ellipsoid (56 pts)"));
     Serial.println(F("  DISCO   = Alignment (24 pts)"));
     Serial.println(F("  SHUTDOWN = power off"));
 }
@@ -79,20 +79,21 @@ bool CalibrationMode::update() {
 
 void CalibrationMode::updateChoosing() {
     if (btns_->wasPressed(Button::MEASURE)) {
-        // Ellipsoid calibration — continuous auto-collection
+        // Ellipsoid calibration
         isEllipsoidMode_ = true;
+        targetCount_ = 56;
         iteration_ = 0;
         magArray_.clear();
         gravArray_.clear();
-        magArray_.reserve(maxCount_);
-        gravArray_.reserve(maxCount_);
+        magArray_.reserve(56);
+        gravArray_.reserve(56);
         bufferCount_ = 0;
         bufferIdx_ = 0;
-        memset(zoneCounts_, 0, sizeof(zoneCounts_));
+        waitingForStable_ = false;
 
         state_ = CalibState::COLLECTING_ELLIPSOID;
         showEllipsoidScreen();
-        Serial.println(F("Starting ellipsoid calibration (continuous collection)..."));
+        Serial.println(F("Starting ellipsoid calibration (56 points)..."));
     }
     else if (btns_->wasPressed(Button::DISCO)) {
         // Alignment calibration
@@ -116,114 +117,6 @@ void CalibrationMode::updateChoosing() {
 // ── State: COLLECTING ───────────────────────────────────────────────
 
 void CalibrationMode::updateCollecting() {
-    if (state_ == CalibState::COLLECTING_ELLIPSOID) {
-        updateCollectingEllipsoid();
-    } else {
-        updateCollectingAlignment();
-    }
-}
-
-// ── Ellipsoid: continuous auto-collection ───────────────────────────
-
-void CalibrationMode::updateCollectingEllipsoid() {
-    // Sample at ~30 Hz (matches RM3100 cycle time of ~14ms at CC=400)
-    uint32_t now = millis();
-    if (now - lastSampleTime_ < 30) return;
-    lastSampleTime_ = now;
-
-    // Read raw sensor data
-    Eigen::Vector3f magReading, gravReading;
-    readSensors(magReading, gravReading);
-
-    // Push into rolling circular buffer
-    magBuffer_[bufferIdx_] = magReading;
-    gravBuffer_[bufferIdx_] = gravReading;
-    bufferIdx_ = (bufferIdx_ + 1) % BUFFER_SIZE;
-    if (bufferCount_ < BUFFER_SIZE) bufferCount_++;
-
-    // Button 1 = early finish (only if minimum coverage met)
-    if (btns_->wasPressed(Button::MEASURE)) {
-        int covered = coveredZoneCount();
-        if (covered >= EARLY_FINISH_ZONES && iteration_ >= EARLY_FINISH_POINTS) {
-            Serial.print(F("Early finish: "));
-            Serial.print(iteration_);
-            Serial.print(F(" pts, "));
-            Serial.print(covered);
-            Serial.println(F("/32 zones"));
-            beep();
-            state_ = CalibState::CALCULATING;
-            return;
-        }
-        // Not enough coverage — flash red to indicate "keep going"
-        disco_->setRed();
-    }
-
-    // Need full buffer for stability check
-    if (bufferCount_ < BUFFER_SIZE) return;
-
-    // Stability gate (relaxed thresholds for slow rotation)
-    bool magStable = isConsistent(magBuffer_, BUFFER_SIZE, ELLIPSOID_MAG_THRESH);
-    bool gravStable = isConsistent(gravBuffer_, BUFFER_SIZE, ELLIPSOID_GRAV_THRESH);
-
-    // While purple flash is active, don't change LED
-    bool flashActive = (now < purpleFlashEnd_);
-
-    if (!magStable || !gravStable) {
-        // Moving too fast — red (unless mid-flash)
-        if (!flashActive) disco_->setRed();
-        return;
-    }
-
-    // Average the buffer
-    Eigen::Vector3f avgMag = average(magBuffer_, BUFFER_SIZE);
-    Eigen::Vector3f avgGrav = average(gravBuffer_, BUFFER_SIZE);
-
-    // Novelty gate — only record if this orientation is new
-    if (!isNovel(avgMag)) {
-        // Stable but already-covered region — green (unless mid-flash)
-        if (!flashActive) disco_->setGreen();
-        return;
-    }
-
-    // Record this point
-    recordPoint(avgMag, avgGrav);
-    updateCoverageZone(avgGrav);
-    iteration_++;
-
-    // Novel reading recorded — purple flash for 300ms
-    disco_->setPurple();
-    purpleFlashEnd_ = now + 300;
-
-    // Update display every point (counter + coverage bar)
-    showEllipsoidScreen();
-
-    // Check auto-complete
-    int covered = coveredZoneCount();
-    if ((covered >= AUTO_COMPLETE_ZONES && iteration_ >= AUTO_COMPLETE_POINTS)
-        || iteration_ >= maxCount_) {
-        Serial.print(F("Auto-complete: "));
-        Serial.print(iteration_);
-        Serial.print(F(" pts, "));
-        Serial.print(covered);
-        Serial.println(F("/32 zones"));
-        beep();
-        state_ = CalibState::CALCULATING;
-        return;
-    }
-
-    // Log every 10 points
-    if (iteration_ % 10 == 0) {
-        Serial.print(F("Ellipsoid: "));
-        Serial.print(iteration_);
-        Serial.print(F(" pts, "));
-        Serial.print(covered);
-        Serial.println(F("/32 zones"));
-    }
-}
-
-// ── Alignment: manual button-press collection (unchanged) ───────────
-
-void CalibrationMode::updateCollectingAlignment() {
     // Sample sensors at ~100 Hz
     uint32_t now = millis();
     if (now - lastSampleTime_ < 10) return;
@@ -247,7 +140,7 @@ void CalibrationMode::updateCollectingAlignment() {
 
     // Check stability when waiting and buffer is full
     if (waitingForStable_ && bufferCount_ >= BUFFER_SIZE) {
-        bool magConsistent = isConsistent(magBuffer_, BUFFER_SIZE, 0.4f);
+        bool magConsistent = isConsistent(magBuffer_, BUFFER_SIZE, 0.3f);
         bool gravConsistent = isConsistent(gravBuffer_, BUFFER_SIZE, 0.1f);
 
         if (magConsistent && gravConsistent) {
@@ -264,12 +157,18 @@ void CalibrationMode::updateCollectingAlignment() {
             bufferCount_ = 0;
             bufferIdx_ = 0;
 
-            showAlignmentProgress();
+            // Update display
+            if (state_ == CalibState::COLLECTING_ELLIPSOID) {
+                updateCoverageBar(avgGrav);
+                showEllipsoidScreen();
+            } else {
+                showAlignmentProgress();
 
-            // Triple beep at direction changes (every 8 points)
-            if (iteration_ % 8 == 0 && iteration_ < targetCount_) {
-                beepTriple();
-                Serial.println(F("Change direction..."));
+                // Triple beep at direction changes (every 8 points)
+                if (iteration_ % 8 == 0 && iteration_ < targetCount_) {
+                    beepTriple();
+                    Serial.println(F("Change direction..."));
+                }
             }
 
             Serial.print(F("Point "));
@@ -408,7 +307,7 @@ void CalibrationMode::recordPoint(const Eigen::Vector3f& mag, const Eigen::Vecto
 
 // ── Coverage bar ────────────────────────────────────────────────────
 
-void CalibrationMode::updateCoverageZone(const Eigen::Vector3f& grav) {
+void CalibrationMode::updateCoverageBar(const Eigen::Vector3f& grav) {
     // Map gravity vector to coverage zone
     float magnitude = grav.norm();
     if (magnitude < 0.001f) return;
@@ -422,41 +321,7 @@ void CalibrationMode::updateCoverageZone(const Eigen::Vector3f& grav) {
     int col = (int)(azimuth / 45.0f);
     col = max(0, min(COV_COLS - 1, col));
 
-    zoneCounts_[row][col]++;
-}
-
-bool CalibrationMode::isNovel(const Eigen::Vector3f& mag) const {
-    // Check if this magnetometer reading is sufficiently different from all
-    // previously recorded points (angular distance in degrees)
-    float magNorm = mag.norm();
-    if (magNorm < 0.001f) return false;
-
-    Eigen::Vector3f magUnit = mag / magNorm;
-
-    for (const auto& existing : magArray_) {
-        float existNorm = existing.norm();
-        if (existNorm < 0.001f) continue;
-        Eigen::Vector3f existUnit = existing / existNorm;
-        float dot = magUnit.dot(existUnit);
-        dot = fmaxf(-1.0f, fminf(1.0f, dot));
-        float angleDeg = acosf(dot) * (180.0f / M_PI);
-        if (angleDeg < MIN_ANGULAR_DIST) {
-            return false;
-        }
-    }
-    return true;
-}
-
-int CalibrationMode::coveredZoneCount() const {
-    int count = 0;
-    for (int r = 0; r < COV_ROWS; r++) {
-        for (int c = 0; c < COV_COLS; c++) {
-            if (zoneCounts_[r][c] >= ZONE_COVERED_THRESHOLD) {
-                count++;
-            }
-        }
-    }
-    return count;
+    coverageZones_[row][col] = true;
 }
 
 // ── Display helpers ─────────────────────────────────────────────────
@@ -504,7 +369,7 @@ void CalibrationMode::showEllipsoidScreen() {
 
     // Counter
     char buf[16];
-    snprintf(buf, sizeof(buf), "%d pts", iteration_);
+    snprintf(buf, sizeof(buf), "%d/56", iteration_);
     d.setTextSize(3);
     d.setCursor(0, 30);
     d.print(buf);
@@ -512,7 +377,7 @@ void CalibrationMode::showEllipsoidScreen() {
     // Instruction
     d.setTextSize(1);
     d.setCursor(0, 68);
-    d.print(F("Rotate slowly..."));
+    d.print(F("Button 1 to record"));
 
     // Coverage bar
     showCoverageBar();
@@ -537,7 +402,7 @@ void CalibrationMode::showCoverageBar() {
     for (int c = 0; c < COV_COLS; c++) {
         int filled = 0;
         for (int r = 0; r < COV_ROWS; r++)
-            if (zoneCounts_[r][c]) filled++;
+            if (coverageZones_[r][c]) filled++;
 
         if (filled > 0) {
             int fillH = filled * rowH;
@@ -556,7 +421,7 @@ void CalibrationMode::showCoverageBar() {
         int total = 0;
         for (int r = 0; r < COV_ROWS; r++)
             for (int cc = 0; cc < COV_COLS; cc++)
-                if (zoneCounts_[r][cc]) total++;
+                if (coverageZones_[r][cc]) total++;
         Serial.print(F("Coverage: "));
         Serial.print(total);
         Serial.println(F("/32 zones"));
@@ -772,11 +637,27 @@ bool CalibrationMode::saveCalibration() {
     JsonObject root = doc.to<JsonObject>();
     cal_->toJson(root);
 
-    // Serialize to string
-    char jsonBuf[1024];
-    size_t len = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
-    if (len == 0 || len >= sizeof(jsonBuf)) {
-        Serial.println(F("JSON serialization failed"));
+    // Pre-check required size before serializing — serializeJson silently
+    // truncates when the buffer is too small and returns sizeof(buf)-1, so
+    // the naive "len >= sizeof(buf)" check never fires on overflow.
+    size_t required = measureJson(doc);
+    if (required == 0) {
+        Serial.println(F("JSON serialization failed (empty)"));
+        return false;
+    }
+
+    static constexpr size_t JSON_BUF_SIZE = 2048;
+    if (required >= JSON_BUF_SIZE) {
+        Serial.print(F("JSON too large: "));
+        Serial.print(required);
+        Serial.println(F(" bytes"));
+        return false;
+    }
+
+    char jsonBuf[JSON_BUF_SIZE];
+    size_t len = serializeJson(doc, jsonBuf, JSON_BUF_SIZE);
+    if (len != required) {
+        Serial.println(F("JSON serialization error"));
         return false;
     }
 
