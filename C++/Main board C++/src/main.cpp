@@ -174,6 +174,24 @@ static bool linearWithinTol(const float* vals, uint8_t n, float tol);
 static void onFlushReading(float az, float inc, float dist);
 static void enterUsbDriveMode();  // USB MSC loop (does not return)
 
+// ── USB MSC block-level callbacks ───────────────────────────────────
+// Defined here (before setup) so the early USB drive mode check can use them.
+static Adafruit_SPIFlash* s_mscFlash = nullptr;
+
+static int32_t msc_read_cb(uint32_t lba, void* buffer, uint32_t bufsize) {
+    return s_mscFlash->readBlocks(lba, (uint8_t*)buffer, bufsize / 512)
+           ? (int32_t)bufsize : -1;
+}
+
+static int32_t msc_write_cb(uint32_t lba, uint8_t* buffer, uint32_t bufsize) {
+    return s_mscFlash->writeBlocks(lba, buffer, bufsize / 512)
+           ? (int32_t)bufsize : -1;
+}
+
+static void msc_flush_cb() {
+    s_mscFlash->syncBlocks();
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // ── Setup ─────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════
@@ -186,11 +204,72 @@ void setup() {
     Wire.begin();
     Wire.setClock(400000);
     initDisplay();
-    uint32_t splashStart = millis();
-    display.showSplash(false);
 
     // Configure button pull-up BEFORE reading it
     pinMode(PIN_BTN_MEASURE, INPUT_PULLUP);
+
+    // ── Early USB drive mode check ─────────────────────────────────
+    // Must happen BEFORE Serial.begin() so MSC is part of the initial
+    // USB enumeration — otherwise the host won't see the mass storage
+    // device without a cable replug.
+    // Check for usb_drive flag BEFORE showing splash so the user sees
+    // "Entering USB mode..." instead of the normal splash screen.
+    {
+        bool earlyFlash = configMgr.begin();  // safe before Serial — prints are no-ops
+        if (earlyFlash && configMgr.hasFlag("usb_drive")) {
+            configMgr.clearFlag("usb_drive");
+
+            // Show transitional message while USB stack initialises
+            if (dispOk) {
+                auto& d = display.getDisplay();
+                d.clearDisplay();
+                d.setTextSize(1);
+                d.setTextColor(SH110X_WHITE);
+                d.setCursor(0, 56);
+                d.println(F("Entering USB mode..."));
+                d.display();
+            }
+
+            // Register MSC interface BEFORE USB stack enumerates
+            s_mscFlash = configMgr.getFlash();
+            if (s_mscFlash) {
+                usbMsc.setID("Mr_Zappy", "Settings", "1.0");
+                usbMsc.setReadWriteCallback(msc_read_cb, msc_write_cb, msc_flush_cb);
+                usbMsc.setCapacity(s_mscFlash->size() / 512, 512);
+                usbMsc.setUnitReady(true);
+                usbMsc.begin();
+            }
+
+            Serial.begin(115200);
+            Serial.println(F("=== USB Drive Mode (early init) ==="));
+
+            // Show final instructions
+            if (dispOk) {
+                auto& d = display.getDisplay();
+                d.clearDisplay();
+                d.setTextSize(1);
+                d.setTextColor(SH110X_WHITE);
+                d.setCursor(0, 10);
+                d.println(F("USB Drive Mode"));
+                d.println();
+                d.println(F("Edit config.json"));
+                d.println(F("on the USB drive."));
+                d.println();
+                d.println(F("Eject drive, then"));
+                d.println(F("hold power button"));
+                d.println(F("to restart."));
+                d.display();
+            }
+
+            // Spin forever — device stays in USB drive mode until power cycled
+            while (true) { delay(100); }
+            // Does not return
+        }
+    }
+
+    // Normal boot — show splash screen now that we know we're not in USB mode
+    uint32_t splashStart = millis();
+    display.showSplash(false);
 
     Serial.begin(115200);
     if (digitalRead(PIN_BTN_MEASURE) == LOW) {   // hold MEASURE for serial debug
@@ -442,14 +521,8 @@ void loop() {
             d.clearDisplay();
             d.setTextSize(1);
             d.setTextColor(SH110X_WHITE);
-            d.setCursor(0, 10);
-            d.println(F("USB Drive Mode"));
-            d.println();
-            d.println(F("Plug into PC to"));
-            d.println(F("edit config.json"));
-            d.println();
-            d.println(F("Hold power button"));
-            d.println(F("to exit."));
+            d.setCursor(0, 56);
+            d.println(F("Entering USB mode..."));
             d.display();
         }
         // Set flag file so USB MSC mode starts after reboot
@@ -1571,23 +1644,6 @@ static void initDisco() {
 // ═══════════════════════════════════════════════════════════════════
 // ── USB Mass Storage Drive Mode ───────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════
-
-// Block-level callbacks for TinyUSB MSC — forward to QSPI flash
-static Adafruit_SPIFlash* s_mscFlash = nullptr;
-
-static int32_t msc_read_cb(uint32_t lba, void* buffer, uint32_t bufsize) {
-    return s_mscFlash->readBlocks(lba, (uint8_t*)buffer, bufsize / 512)
-           ? (int32_t)bufsize : -1;
-}
-
-static int32_t msc_write_cb(uint32_t lba, uint8_t* buffer, uint32_t bufsize) {
-    return s_mscFlash->writeBlocks(lba, buffer, bufsize / 512)
-           ? (int32_t)bufsize : -1;
-}
-
-static void msc_flush_cb() {
-    s_mscFlash->syncBlocks();
-}
 
 static void enterUsbDriveMode() {
     Serial.println(F("=== USB Drive Mode ==="));

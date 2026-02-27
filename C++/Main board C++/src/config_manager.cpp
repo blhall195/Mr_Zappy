@@ -18,6 +18,8 @@ Adafruit_SPIFlash* ConfigManager::getFlash() {
 
 // ── begin() ────────────────────────────────────────────────────────
 bool ConfigManager::begin() {
+    if (mounted_) return true;  // already initialized — idempotent
+
     if (!s_flash.begin()) {
         Serial.println(F("QSPI flash init FAILED"));
         return false;
@@ -153,7 +155,7 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["laser_timeout"]          = cfg.laserTimeout;
     doc["ble_name"]               = cfg.bleName;
 
-    size_t written = serializeJson(doc, file);
+    size_t written = serializeJsonPretty(doc, file);
     file.close();
     return written > 0;
 }
