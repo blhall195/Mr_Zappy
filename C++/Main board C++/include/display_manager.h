@@ -69,4 +69,5 @@ private:
 
     void drawMainScreen();
     void drawBattery(float pct);
+    void drawDegreeSymbol(int16_t y);
 };

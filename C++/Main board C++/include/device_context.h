@@ -48,6 +48,7 @@ struct DeviceContext {
     bool buzzerEnabled = false;
     bool discoOn       = false;
     bool laserOnFlag   = true;
+    bool quickShot     = false;   // true = use wider stability tolerance (button 2)
 
     // BLE / connectivity
     bool     bleConnected              = false;
@@ -58,6 +59,7 @@ struct DeviceContext {
     uint32_t lastActivityTime    = 0;  // millis()
     uint32_t lastMeasurementTime = 0;  // millis()
     bool     purpleLatched       = false;
+    bool     displayFrozen       = false;  // true = show frozen shot readings, not live
 
     // Stability buffers (fixed-size, index-managed)
     float stableAzimuthBuf[3]      = {};

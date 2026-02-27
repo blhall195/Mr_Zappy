@@ -8,9 +8,11 @@
 
 /// What should happen after the menu closes
 enum class MenuExitAction : uint8_t {
-    NONE,           // still active or not yet used
-    RETURN_NORMAL,  // go back to normal operation
-    ENTER_CALIB,    // enter calibration mode
+    NONE,               // still active or not yet used
+    RETURN_NORMAL,      // go back to normal operation
+    ENTER_LONG_CALIB,   // enter long calibration mode
+    ENTER_SHORT_CALIB,  // enter short calibration mode
+    ENTER_SNAKE,        // launch snake game
 };
 
 class MenuManager {
@@ -58,11 +60,13 @@ private:
 
     // Callbacks (static free functions, access state via s_instance)
     static void goToRoot(int);
-    static void enterCalibration(int);
+    static void enterLongCalibration(int);
+    static void enterShortCalibration(int);
     static void setAnomalyOn(int);
     static void setAnomalyOff(int);
     static void deletePending(int);
     static void setLaserTimeout(int value);
     static void setAutoShutdown(int value);
+    static void enterSnakeGame(int);
     static void exitMenu(int);
 };

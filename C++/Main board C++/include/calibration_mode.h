@@ -1,6 +1,7 @@
 #pragma once
 // Calibration Mode — on-device calibration data collection and processing
 // Session 11: port of Python calibration_manager.py + calibration_mode.py
+// Session 13: combined ellipsoid + alignment into single "long calibration" flow
 
 #include <Arduino.h>
 #include <ArduinoEigenDense.h>
@@ -18,10 +19,13 @@
 /// Calibration state machine states
 enum class CalibState : uint8_t {
     INACTIVE,               // not in calibration mode
-    CHOOSING,               // waiting for user to pick ellipsoid or alignment
+    INTRO_ELLIPSOID,        // showing ellipsoid instruction screen
     COLLECTING_ELLIPSOID,   // 56-point ellipsoid collection
+    CALCULATING_ELLIPSOID,  // running ellipsoid fitting math
+    INTRO_ALIGNMENT,        // showing alignment instruction screen
     COLLECTING_ALIGNMENT,   // 24-point alignment collection (3 stages × 8)
-    CALCULATING,            // running fitting math
+    CALCULATING_ALIGNMENT,  // running alignment fitting math (long cal)
+    CALCULATING_SHORT,      // running ellipsoid + alignment on same 24 pts (short cal)
     SHOW_RESULTS,           // displaying accuracy, waiting for save/discard
     SAVING,                 // writing calibration to flash
     DONE                    // finished, caller should exit calibration mode
@@ -30,9 +34,11 @@ enum class CalibState : uint8_t {
 class CalibrationMode {
 public:
     /// Initialize with references to all required peripherals.
+    /// shortCal=true skips directly to alignment-only collection (24 points).
     void begin(ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
                LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
-               ConfigManager& cfgMgr, MagCal::Calibration& cal);
+               ConfigManager& cfgMgr, MagCal::Calibration& cal,
+               bool shortCal = false);
 
     /// Call every loop iteration. Returns true when calibration is complete.
     bool update();
@@ -78,11 +84,13 @@ private:
     float holdCounter_ = 0.0f;
     static constexpr float HOLD_TIME = 0.5f;  // seconds to hold for save/discard
 
+    // ── Calibration mode ──
+    bool isShortCal_ = false;
+
     // ── Results ──
     float resultMagAcc_  = 0.0f;
     float resultGravAcc_ = 0.0f;
     float resultAccuracy_ = 0.0f;
-    bool isEllipsoidMode_ = true;
 
     // ── Timing ──
     uint32_t lastSampleTime_ = 0;
@@ -90,9 +98,11 @@ private:
     bool beepActive_ = false;
 
     // ── State handlers ──
-    void updateChoosing();
+    void updateIntro();
     void updateCollecting();
-    void updateCalculating();
+    void updateCalculatingEllipsoid();
+    void updateCalculatingAlignment();
+    void updateCalculatingShort();
     void updateShowResults();
     void updateSaving();
 
@@ -104,7 +114,8 @@ private:
     void updateCoverageBar(const Eigen::Vector3f& grav);
 
     // ── Display helpers ──
-    void showChoiceScreen();
+    void showEllipsoidIntro();
+    void showAlignmentIntro();
     void showEllipsoidScreen();
     void showAlignmentProgress();
     void showCoverageBar();
