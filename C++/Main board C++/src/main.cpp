@@ -173,11 +173,18 @@ void setup() {
     Wire.begin();
     Wire.setClock(400000);
     initDisplay();
-    display.showSplash(0.0f);
+    uint32_t splashStart = millis();
+    display.showSplash(false);
+
+    // Configure button pull-up BEFORE reading it
+    pinMode(PIN_BTN_MEASURE, INPUT_PULLUP);
 
     Serial.begin(115200);
     if (digitalRead(PIN_BTN_MEASURE) == LOW) {   // hold MEASURE for serial debug
         while (!Serial && millis() < 3000) { }
+        Serial.println(F("I2C bus scan:"));
+        scanI2C();
+        Serial.println();
     }
 
     Serial.println(F("=== Mr_Zappy Main Board C++ ==="));
@@ -187,16 +194,10 @@ void setup() {
     initPins();
     buttons.begin();
 
-    Serial.println(F("I2C bus scan:"));
-    scanI2C();
-    display.showSplash(0.05f);
-    Serial.println();
-
-    // ── Sensors (broken into sub-steps for smooth progress) ──
+    // ── Sensors ──
     magOk = mag.begin(Wire, RM3100_I2C_ADDR, RM3100_CYCLE_COUNT, PIN_MAG_DRDY);
     Serial.print(F("RM3100:      "));
     Serial.println(magOk ? F("OK") : F("FAILED"));
-    display.showSplash(0.12f);
 
     imuOk = imu.begin_I2C(ISM330DHCX_ADDR, &Wire);
     if (imuOk) {
@@ -207,11 +208,10 @@ void setup() {
     }
     Serial.print(F("ISM330DHCX:  "));
     Serial.println(imuOk ? F("OK") : F("FAILED"));
-    display.showSplash(0.20f);
 
     batOk = battery.begin(&Wire);
     if (batOk) {
-        delay(250);  // let SOC register update after wake
+        delay(100);  // let SOC register update after wake
         lastBatPct = battery.cellPercent();
         lastBatRead = millis();
     }
@@ -223,22 +223,26 @@ void setup() {
         Serial.print(F("  Hibernate: ")); Serial.println(battery.isHibernating() ? F("yes") : F("no"));
     }
     Serial.println();
-    display.showSplash(0.35f);
 
     initLaser();
-    display.showSplash(0.42f);
-
     initBle();
-    display.showSplash(0.48f);
-
     initFlash();
-    display.showSplash(0.60f);
-
     initCalibration();
-    display.showSplash(0.90f);
-
     initDisco();
-    display.showSplash(1.0f);
+
+    // ── Splash sequence: off(200) → on(300) → off(200) → on(750) = 1450ms
+    {
+        auto splashLaser = [&]() -> bool {
+            uint32_t t = millis() - splashStart;
+            if (t < 200)  return false;  // off  200ms
+            if (t < 500)  return true;   // on   300ms
+            if (t < 700)  return false;  // off  200ms
+            return true;                 // on   750ms (final hold)
+        };
+        while (millis() - splashStart < 1450) {
+            display.showSplash(splashLaser());
+        }
+    }
 
     // ── Switch display from splash to main screen ────────────────
     if (dispOk) {
@@ -248,14 +252,9 @@ void setup() {
 
     // ── Startup: turn laser on with beep ───────────────────────────
     if (laserOk) {
-        laser.setBuzzer(false);
-        delay(25);
         laser.setLaser(true);
-        delay(200);
         laser.setBuzzer(true);   // startup beep
-        delay(100);
         laser.setBuzzer(false);
-        delay(25);
         ctx.laserEnabled = true;
     }
 
@@ -1406,17 +1405,30 @@ static void initCalibration() {
 
     bool loaded = false;
 
+    // 1. Try binary from flash (fastest — no JSON parse)
     if (flashOk) {
+        MagCal::CalibrationBinary bin;
+        if (configMgr.loadCalibrationBinary(bin)) {
+            loaded = calibration.fromBinary(bin);
+            if (loaded) {
+                Serial.println(F("OK (from binary)"));
+            }
+        }
+    }
+
+    // 2. Fall back to JSON from flash
+    if (!loaded && flashOk) {
         char calBuf[1024];
         size_t calLen = 0;
         if (configMgr.loadCalibrationJson(calBuf, sizeof(calBuf), calLen)) {
             loaded = calibration.fromJson(calBuf, calLen);
             if (loaded) {
-                Serial.println(F("OK (from flash)"));
+                Serial.println(F("OK (from flash JSON)"));
             }
         }
     }
 
+    // 3. Fall back to compiled-in PROGMEM JSON
     if (!loaded) {
         loaded = calibration.fromJson(CALIBRATION_JSON, sizeof(CALIBRATION_JSON) - 1);
         if (loaded) {

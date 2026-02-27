@@ -11,6 +11,18 @@
 
 namespace MagCal {
 
+#pragma pack(push, 1)
+struct SensorBinary {
+    char axes[7];                          // 6 chars + null
+    float transform[9];                    // row-major 3x3
+    float centre[3];
+    uint8_t rbfParamCount[3];             // one per axis
+    float rbfParams[3][RBF::MAX_PARAMS];  // 3 axes × 7 floats
+    float fieldAvg;
+    float fieldStd;
+};
+#pragma pack(pop)
+
 class Sensor {
 public:
     explicit Sensor(const char* axesStr = "+X+Y+Z");
@@ -57,6 +69,12 @@ public:
 
     /// Save calibration to JSON object
     void toJson(JsonObject dict) const;
+
+    /// Load calibration from binary struct
+    bool fromBinary(const SensorBinary& bin);
+
+    /// Save calibration to binary struct
+    void toBinary(SensorBinary& bin) const;
 
     // ── Accessors ──
 

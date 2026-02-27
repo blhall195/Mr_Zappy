@@ -1,5 +1,6 @@
 #include "config_manager.h"
 #include "config.h"
+#include "mag_cal/calibration.h"
 
 #include "SdFat.h"
 #include "Adafruit_SPIFlash.h"
@@ -133,6 +134,36 @@ bool ConfigManager::saveCalibrationJson(const char* json, size_t len) {
     size_t written = file.write(json, len);
     file.close();
     return written == len;
+}
+
+bool ConfigManager::loadCalibrationBinary(MagCal::CalibrationBinary& out) {
+    if (!mounted_) return false;
+
+    File32 file = s_fatfs.open("/calibration.bin", FILE_READ);
+    if (!file) return false;
+
+    size_t fileSize = file.size();
+    if (fileSize != sizeof(MagCal::CalibrationBinary)) {
+        file.close();
+        return false;
+    }
+
+    size_t bytesRead = file.read(reinterpret_cast<uint8_t*>(&out), sizeof(out));
+    file.close();
+    return bytesRead == sizeof(out);
+}
+
+bool ConfigManager::saveCalibrationBinary(const MagCal::CalibrationBinary& data) {
+    if (!mounted_) return false;
+
+    s_fatfs.remove("/calibration.bin");
+
+    File32 file = s_fatfs.open("/calibration.bin", FILE_WRITE);
+    if (!file) return false;
+
+    size_t written = file.write(reinterpret_cast<const uint8_t*>(&data), sizeof(data));
+    file.close();
+    return written == sizeof(data);
 }
 
 // ── Pending readings ───────────────────────────────────────────────

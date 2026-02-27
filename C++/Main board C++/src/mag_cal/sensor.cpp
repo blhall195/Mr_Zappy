@@ -1,6 +1,7 @@
 #include "mag_cal/sensor.h"
 #include "mag_cal/utils.h"
 #include <math.h>
+#include <string.h>
 
 namespace MagCal {
 
@@ -158,6 +159,68 @@ void Sensor::toJson(JsonObject dict) const {
 
     dict["field_avg"] = fieldAvg_;
     dict["field_std"] = fieldStd_;
+}
+
+// ── Binary serialization ─────────────────────────────────────────────
+
+bool Sensor::fromBinary(const SensorBinary& bin) {
+    axes_ = Axes(bin.axes);
+
+    // transform: row-major flat array → Eigen Matrix3f
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+            transform_(r, c) = bin.transform[r * 3 + c];
+
+    for (int i = 0; i < 3; i++)
+        centre_[i] = bin.centre[i];
+
+    // RBFs
+    hasRbfs_ = false;
+    for (int axis = 0; axis < 3; axis++) {
+        int count = bin.rbfParamCount[axis];
+        if (count > 0 && count <= RBF::MAX_PARAMS) {
+            rbfs_[axis].init(bin.rbfParams[axis], count);
+            for (int k = 0; k < count; k++) {
+                if (bin.rbfParams[axis][k] != 0.0f) { hasRbfs_ = true; break; }
+            }
+        }
+    }
+
+    fieldAvg_ = bin.fieldAvg;
+    fieldStd_ = bin.fieldStd;
+    calibrated_ = true;
+    return true;
+}
+
+void Sensor::toBinary(SensorBinary& bin) const {
+    memset(&bin, 0, sizeof(bin));
+
+    // axes
+    const char* s = axes_.toString();
+    strncpy(bin.axes, s, 6);
+    bin.axes[6] = '\0';
+
+    // transform: Eigen Matrix3f → row-major flat array
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+            bin.transform[r * 3 + c] = transform_(r, c);
+
+    for (int i = 0; i < 3; i++)
+        bin.centre[i] = centre_[i];
+
+    // RBFs
+    for (int axis = 0; axis < 3; axis++) {
+        int count = rbfs_[axis].paramCount();
+        bin.rbfParamCount[axis] = (uint8_t)count;
+        if (count > 0) {
+            const float* p = rbfs_[axis].params();
+            for (int j = 0; j < count; j++)
+                bin.rbfParams[axis][j] = p[j];
+        }
+    }
+
+    bin.fieldAvg = fieldAvg_;
+    bin.fieldStd = fieldStd_;
 }
 
 // ── Fitting methods (Session 11) ────────────────────────────────────
