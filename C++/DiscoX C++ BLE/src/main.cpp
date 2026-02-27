@@ -121,6 +121,9 @@ void setup() {
     // UART handler state
     uartInit();
 
+    // Signal main board that UART/BLE stack is ready to receive commands.
+    Serial1.write("READY\n");
+
     Serial.println("DiscoX BLE bridge ready");
 }
 

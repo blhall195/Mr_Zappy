@@ -102,6 +102,7 @@ const char* BleManager::commandName(BleCommand cmd) {
     switch (cmd) {
         case BleCommand::NONE:         return "NONE";
         case BleCommand::ACK_RECEIVED: return "ACK_RECEIVED";
+        case BleCommand::READY:        return "READY";
         case BleCommand::STOP_CAL:     return "STOP_CAL";
         case BleCommand::START_CAL:    return "START_CAL";
         case BleCommand::DEVICE_OFF:   return "DEVICE_OFF";
@@ -127,6 +128,11 @@ BleCommand BleManager::parseLine(const char* line) {
     // ACK acknowledgement (sent as literal string by DiscoX C++)
     if (strcmp(line, "ACK_RECEIVED") == 0) {
         return BleCommand::ACK_RECEIVED;
+    }
+
+    // Startup readiness from DiscoX board
+    if (strcmp(line, "READY") == 0) {
+        return BleCommand::READY;
     }
 
     // Decimal command codes (e.g. "48", "54")

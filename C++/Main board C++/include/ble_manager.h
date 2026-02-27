@@ -8,6 +8,7 @@
 enum class BleCommand : uint8_t {
     NONE = 0,
     ACK_RECEIVED,     // "ACK_RECEIVED\n" from DiscoX
+    READY,            // "READY\n" from DiscoX after BLE/UART startup
     STOP_CAL,         // "48\n"  (0x30)
     START_CAL,        // "49\n"  (0x31)
     DEVICE_OFF,       // "52\n"  (0x34)
