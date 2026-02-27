@@ -421,7 +421,7 @@ void CalibrationMode::showAlignmentIntro() {
     d.setTextSize(2);
     d.setCursor(0, 0);
     d.println(F("Calibrate"));
-    d.println(F("Phase 2"));
+    d.println(F("short mode"));
 
     // Instructions
     d.setTextSize(1);
