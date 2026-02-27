@@ -736,6 +736,19 @@ bool CalibrationMode::saveCalibration() {
         return false;
     }
 
-    // Save to flash
-    return cfgMgr_->saveCalibrationJson(jsonBuf, len);
+    // Save JSON to flash (human-readable backup)
+    bool jsonOk = cfgMgr_->saveCalibrationJson(jsonBuf, len);
+
+    // Save binary to flash (fast boot path)
+    MagCal::CalibrationBinary bin;
+    cal_->toBinary(bin);
+    bool binOk = cfgMgr_->saveCalibrationBinary(bin);
+
+    if (binOk) {
+        Serial.println(F("  Binary calibration saved"));
+    } else {
+        Serial.println(F("  Binary calibration save FAILED"));
+    }
+
+    return jsonOk;
 }

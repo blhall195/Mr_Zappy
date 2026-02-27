@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include "device_context.h"
 
+namespace MagCal { struct CalibrationBinary; }
+
 // Boot-mode flag names
 namespace Flags {
     constexpr const char* CALIBRATION = "calibration";
@@ -35,6 +37,12 @@ public:
 
     // Save calibration JSON string to /calibration.json.
     bool saveCalibrationJson(const char* json, size_t len);
+
+    // Load calibration binary from /calibration.bin.
+    bool loadCalibrationBinary(MagCal::CalibrationBinary& out);
+
+    // Save calibration binary to /calibration.bin.
+    bool saveCalibrationBinary(const MagCal::CalibrationBinary& data);
 
     // ── Pending readings (offline queue) ────────────────────────────
 

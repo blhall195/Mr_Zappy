@@ -120,7 +120,7 @@ void DisplayManager::showInitialisingMessage() {
     _display.display();
 }
 
-void DisplayManager::showSplash(float progress) {
+void DisplayManager::showSplash(bool laserOn) {
     if (!_initialized) return;
 
     _display.clearDisplay();
@@ -203,8 +203,6 @@ void DisplayManager::showSplash(float progress) {
     static constexpr int16_t BEAM_X0  = BODY_CX + BODY_HW + 2;
     static constexpr int16_t BEAM_X1  = 112;
 
-    bool laserOn = ((millis() / 400) % 2) == 0;  // toggle every 400ms
-
     if (laserOn) {
         // Main beam (2px thick)
         _display.drawLine(BEAM_X0, BEAM_Y,     BEAM_X1, BEAM_Y,     SH110X_WHITE);
@@ -227,19 +225,10 @@ void DisplayManager::showSplash(float progress) {
         _display.fillCircle(STAR_CX, STAR_CY, 2, SH110X_WHITE);
     }
 
-    // ── Progress bar ────────────────────────────────────────────
-    static constexpr int16_t BAR_X = 10;
-    static constexpr int16_t BAR_Y = 112;
-    static constexpr int16_t BAR_W = 108;
-    static constexpr int16_t BAR_H = 10;
-
-    _display.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, SH110X_WHITE);
-
-    float clamped = constrain(progress, 0.0f, 1.0f);
-    int16_t fillW = (int16_t)(clamped * (BAR_W - 2));
-    if (fillW > 0) {
-        _display.fillRect(BAR_X + 1, BAR_Y + 1, fillW, BAR_H - 2, SH110X_WHITE);
-    }
+    // ── "Initialising..." text ────────────────────────────────────
+    _display.setTextSize(1);
+    _display.setCursor(12, 108);
+    _display.print(F("Initialising..."));
 
     _display.display();
 }

@@ -34,6 +34,22 @@ enum class AnomalyType : uint8_t {
     DIP
 };
 
+// ── Binary calibration format (fast boot) ───────────────────────────
+static constexpr uint32_t CAL_BINARY_MAGIC   = 0x43414C00; // "CAL\0"
+static constexpr uint8_t  CAL_BINARY_VERSION = 1;
+
+#pragma pack(push, 1)
+struct CalibrationBinary {
+    uint32_t magic;
+    uint8_t  version;
+    uint8_t  reserved;
+    SensorBinary mag;
+    SensorBinary grav;
+    float    dipAvg;
+    uint16_t crc16;
+};
+#pragma pack(pop)
+
 class Calibration {
 public:
     static constexpr Strictness DEFAULT_STRICTNESS = {2.0f, 2.0f, 3.0f};
@@ -114,6 +130,12 @@ public:
 
     /// Write calibration to a JSON object
     void toJson(JsonObject dict) const;
+
+    /// Load calibration from binary struct (fast boot path)
+    bool fromBinary(const CalibrationBinary& bin);
+
+    /// Save calibration to binary struct
+    void toBinary(CalibrationBinary& bin) const;
 
     // ── Accessors ──
 

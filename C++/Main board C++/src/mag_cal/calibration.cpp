@@ -3,6 +3,7 @@
 #include "mag_cal/rbf.h"
 #include <math.h>
 #include <algorithm>
+#include <string.h>
 
 namespace MagCal {
 
@@ -146,6 +147,51 @@ void Calibration::toJson(JsonObject dict) const {
     grav_.toJson(gravObj);
 
     dict["dip_avg"] = dipAvg_;
+}
+
+// ── CRC-16-CCITT ────────────────────────────────────────────────────
+
+static uint16_t crc16_ccitt(const uint8_t* data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= (uint16_t)data[i] << 8;
+        for (int j = 0; j < 8; j++) {
+            crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
+        }
+    }
+    return crc;
+}
+
+// ── Binary serialization ────────────────────────────────────────────
+
+bool Calibration::fromBinary(const CalibrationBinary& bin) {
+    if (bin.magic != CAL_BINARY_MAGIC) return false;
+    if (bin.version != CAL_BINARY_VERSION) return false;
+
+    // Verify CRC over everything before the crc16 field
+    size_t crcLen = offsetof(CalibrationBinary, crc16);
+    uint16_t expected = crc16_ccitt(reinterpret_cast<const uint8_t*>(&bin), crcLen);
+    if (bin.crc16 != expected) return false;
+
+    if (!mag_.fromBinary(bin.mag)) return false;
+    if (!grav_.fromBinary(bin.grav)) return false;
+    dipAvg_ = bin.dipAvg;
+    return true;
+}
+
+void Calibration::toBinary(CalibrationBinary& bin) const {
+    memset(&bin, 0, sizeof(bin));
+    bin.magic   = CAL_BINARY_MAGIC;
+    bin.version = CAL_BINARY_VERSION;
+    bin.reserved = 0;
+
+    mag_.toBinary(bin.mag);
+    grav_.toBinary(bin.grav);
+    bin.dipAvg = dipAvg_;
+
+    // CRC over everything before the crc16 field
+    size_t crcLen = offsetof(CalibrationBinary, crc16);
+    bin.crc16 = crc16_ccitt(reinterpret_cast<const uint8_t*>(&bin), crcLen);
 }
 
 // ── Fitting methods (Session 11) ────────────────────────────────────

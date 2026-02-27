@@ -45,8 +45,8 @@ public:
     /// Show "Device Initialising" message
     void showInitialisingMessage();
 
-    /// Show animated boot splash with disco ball and progress bar (0.0–1.0)
-    void showSplash(float progress);
+    /// Show boot splash with laser beam on or off
+    void showSplash(bool laserOn);
 
     /// Push buffer to OLED (call after updates)
     void refresh();

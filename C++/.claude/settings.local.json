@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio run)",
+      "Bash(\"C:/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" run)",
+      "Bash(python3 -c \":*)",
+      "Bash(\"C:/Users/Brendans-PC/.platformio/penv/Scripts/python.exe\" -c \":*)",
+      "Bash(pio run -t upload)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run -t upload)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe device list)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run -t upload --upload-port COM34)",
+      "Bash(\"C:/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" run -t upload)",
+      "Bash(\"C:/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" device list)",
+      "Bash(\"C:/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" run -t upload --upload-port COM34)",
+      "Bash(~/.platformio/penv/Scripts/pio run)",
+      "Bash(~/.platformio/penv/Scripts/pio run -t upload)",
+      "Bash(~/.platformio/penv/Scripts/pio device list)",
+      "Bash(~/.platformio/penv/Scripts/pio run --target upload --upload-port COM32)",
+      "Bash(~/.platformio/penv/Scripts/pio run --target upload)",
+      "Bash(~/.platformio/penv/Scripts/pio device monitor --port COM34 --baud 115200)",
+      "Bash(~/.platformio/penv/Scripts/pio device monitor --port COM35 --baud 115200)"
+    ]
+  }
+}
