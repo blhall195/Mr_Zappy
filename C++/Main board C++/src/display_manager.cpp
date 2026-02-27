@@ -23,8 +23,10 @@ static constexpr int16_t DIST_Y     = 34;
 static constexpr int16_t AZ_Y       = 68;
 static constexpr int16_t INC_Y      = 100;
 
-// Degree symbol in the default GFX font (CP437 code page)
-static constexpr char DEG = '\xF8';
+// Degree symbol drawn as a small circle (looks better than CP437 '\xF8' at size 3)
+static constexpr int16_t DEG_RADIUS  = 3;
+static constexpr int16_t DEG_OFFSET_X = 2;   // gap after text
+static constexpr int16_t DEG_OFFSET_Y = 3;   // down from top of text line
 
 // ── Public API ─────────────────────────────────────────────────────
 
@@ -159,12 +161,19 @@ void DisplayManager::drawMainScreen() {
     // ── Azimuth (size 3) ────────────────────────────────────────
     _display.setCursor(0, AZ_Y);
     _display.print(_azimuth, 1);
-    _display.print(DEG);
+    drawDegreeSymbol(AZ_Y);
 
     // ── Inclination (size 3) ────────────────────────────────────
     _display.setCursor(0, INC_Y);
     _display.print(_inclination, 1);
-    _display.print(DEG);
+    drawDegreeSymbol(INC_Y);
+}
+
+void DisplayManager::drawDegreeSymbol(int16_t y) {
+    int16_t cx = _display.getCursorX() + DEG_OFFSET_X + DEG_RADIUS;
+    int16_t cy = y + DEG_OFFSET_Y + DEG_RADIUS;
+    _display.drawCircle(cx, cy, DEG_RADIUS,     SH110X_WHITE);
+    _display.drawCircle(cx, cy, DEG_RADIUS - 1, SH110X_WHITE);
 }
 
 void DisplayManager::drawBattery(float pct) {

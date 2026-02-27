@@ -96,11 +96,12 @@ void MenuManager::buildMenu() {
     _root.addSubmenu("Delete saved shots", &_deleteSub);
     _root.addSubmenu(_laserLabel, &_laserSub);
     _root.addSubmenu(_shutdownLabel, &_shutdownSub);
+    _root.addAction("Snake Game", enterSnakeGame);
     _root.addAction("Exit", exitMenu);
 
     // ── Enter Calibration submenu ────────────────────────────────
-    _calSub.addAction("No", goToRoot);
-    _calSub.addAction("Yes", enterCalibration);
+    _calSub.addAction("Long Calibration", enterLongCalibration);
+    _calSub.addAction("Short Calibration", enterShortCalibration);
     _calSub.addAction("<- Back", goToRoot);
 
     // ── Anomaly Detection submenu ────────────────────────────────
@@ -139,11 +140,18 @@ void MenuManager::goToRoot(int) {
     s_instance->_root.closeSub();
 }
 
-void MenuManager::enterCalibration(int) {
+void MenuManager::enterLongCalibration(int) {
     if (!s_instance) return;
-    Serial.println(F("Menu: entering calibration mode"));
+    Serial.println(F("Menu: entering long calibration"));
     s_instance->_active = false;
-    s_instance->_exitAction = MenuExitAction::ENTER_CALIB;
+    s_instance->_exitAction = MenuExitAction::ENTER_LONG_CALIB;
+}
+
+void MenuManager::enterShortCalibration(int) {
+    if (!s_instance) return;
+    Serial.println(F("Menu: entering short calibration"));
+    s_instance->_active = false;
+    s_instance->_exitAction = MenuExitAction::ENTER_SHORT_CALIB;
 }
 
 void MenuManager::setAnomalyOn(int) {
@@ -165,8 +173,10 @@ void MenuManager::setAnomalyOff(int) {
 void MenuManager::deletePending(int) {
     if (!s_instance) return;
     s_instance->_cfgMgr->clearPendingReadings();
+    s_instance->_ctx->bleDisconnectionCounter = 0;
     Serial.println(F("Menu: pending readings deleted"));
-    s_instance->_root.closeSub();
+    s_instance->_active = false;
+    s_instance->_exitAction = MenuExitAction::RETURN_NORMAL;
 }
 
 void MenuManager::setLaserTimeout(int value) {
@@ -185,6 +195,13 @@ void MenuManager::setAutoShutdown(int value) {
     Serial.print(F("Menu: auto shutdown = "));
     Serial.println(value);
     s_instance->buildMenu();
+}
+
+void MenuManager::enterSnakeGame(int) {
+    if (!s_instance) return;
+    Serial.println(F("Menu: launching snake game"));
+    s_instance->_active = false;
+    s_instance->_exitAction = MenuExitAction::ENTER_SNAKE;
 }
 
 void MenuManager::exitMenu(int) {

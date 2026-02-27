@@ -6,7 +6,8 @@
 void CalibrationMode::begin(
     ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
     LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
-    ConfigManager& cfgMgr, MagCal::Calibration& cal)
+    ConfigManager& cfgMgr, MagCal::Calibration& cal,
+    bool shortCal)
 {
     btns_      = &btns;
     disp_      = &disp;
@@ -35,13 +36,17 @@ void CalibrationMode::begin(
     // Turn on laser for calibration
     laser_->setLaser(true);
 
-    state_ = CalibState::CHOOSING;
-    showChoiceScreen();
+    isShortCal_ = shortCal;
 
-    Serial.println(F("Calibration mode entered."));
-    Serial.println(F("  MEASURE = Ellipsoid (56 pts)"));
-    Serial.println(F("  DISCO   = Alignment (24 pts)"));
-    Serial.println(F("  SHUTDOWN = power off"));
+    if (shortCal) {
+        Serial.println(F("Calibration mode: Short Calibration"));
+        state_ = CalibState::INTRO_ALIGNMENT;
+        showAlignmentIntro();
+    } else {
+        Serial.println(F("Calibration mode: Long Calibration"));
+        state_ = CalibState::INTRO_ELLIPSOID;
+        showEllipsoidIntro();
+    }
 }
 
 // ── Main update loop ────────────────────────────────────────────────
@@ -63,54 +68,61 @@ bool CalibrationMode::update() {
     }
 
     switch (state_) {
-        case CalibState::CHOOSING:            updateChoosing(); break;
+        case CalibState::INTRO_ELLIPSOID:
+        case CalibState::INTRO_ALIGNMENT:     updateIntro(); break;
         case CalibState::COLLECTING_ELLIPSOID:
         case CalibState::COLLECTING_ALIGNMENT: updateCollecting(); break;
-        case CalibState::CALCULATING:         updateCalculating(); break;
-        case CalibState::SHOW_RESULTS:        updateShowResults(); break;
-        case CalibState::SAVING:              updateSaving(); break;
+        case CalibState::CALCULATING_ELLIPSOID:  updateCalculatingEllipsoid(); break;
+        case CalibState::CALCULATING_ALIGNMENT:  updateCalculatingAlignment(); break;
+        case CalibState::CALCULATING_SHORT:      updateCalculatingShort(); break;
+        case CalibState::SHOW_RESULTS:         updateShowResults(); break;
+        case CalibState::SAVING:               updateSaving(); break;
         default: break;
     }
 
     return (state_ == CalibState::DONE);
 }
 
-// ── State: CHOOSING ─────────────────────────────────────────────────
+// ── State: INTRO (ellipsoid or alignment) ───────────────────────────
 
-void CalibrationMode::updateChoosing() {
-    if (btns_->wasPressed(Button::MEASURE)) {
-        // Ellipsoid calibration
-        isEllipsoidMode_ = true;
-        targetCount_ = 56;
-        iteration_ = 0;
-        magArray_.clear();
-        gravArray_.clear();
-        magArray_.reserve(56);
-        gravArray_.reserve(56);
-        bufferCount_ = 0;
-        bufferIdx_ = 0;
-        waitingForStable_ = false;
+void CalibrationMode::updateIntro() {
+    // Dismiss intro screen on any button press
+    if (btns_->wasPressed(Button::MEASURE) ||
+        btns_->wasPressed(Button::DISCO)   ||
+        btns_->wasPressed(Button::CALIB)   ||
+        btns_->wasPressed(Button::FIRE)) {
 
-        state_ = CalibState::COLLECTING_ELLIPSOID;
-        showEllipsoidScreen();
-        Serial.println(F("Starting ellipsoid calibration (56 points)..."));
-    }
-    else if (btns_->wasPressed(Button::DISCO)) {
-        // Alignment calibration
-        isEllipsoidMode_ = false;
-        targetCount_ = 24;
-        iteration_ = 0;
-        magArray_.clear();
-        gravArray_.clear();
-        magArray_.reserve(24);
-        gravArray_.reserve(24);
-        bufferCount_ = 0;
-        bufferIdx_ = 0;
-        waitingForStable_ = false;
+        if (state_ == CalibState::INTRO_ELLIPSOID) {
+            // Start ellipsoid collection
+            targetCount_ = 56;
+            iteration_ = 0;
+            magArray_.clear();
+            gravArray_.clear();
+            magArray_.reserve(56);
+            gravArray_.reserve(56);
+            bufferCount_ = 0;
+            bufferIdx_ = 0;
+            waitingForStable_ = false;
 
-        state_ = CalibState::COLLECTING_ALIGNMENT;
-        showAlignmentProgress();
-        Serial.println(F("Starting alignment calibration (24 points: 3 dirs x 8 rotations)..."));
+            state_ = CalibState::COLLECTING_ELLIPSOID;
+            showEllipsoidScreen();
+            Serial.println(F("Starting ellipsoid collection (56 points)..."));
+        } else {
+            // Start alignment collection
+            targetCount_ = 24;
+            iteration_ = 0;
+            magArray_.clear();
+            gravArray_.clear();
+            magArray_.reserve(24);
+            gravArray_.reserve(24);
+            bufferCount_ = 0;
+            bufferIdx_ = 0;
+            waitingForStable_ = false;
+
+            state_ = CalibState::COLLECTING_ALIGNMENT;
+            showAlignmentProgress();
+            Serial.println(F("Starting alignment collection (24 points: 3 dirs x 8 rotations)..."));
+        }
     }
 }
 
@@ -183,15 +195,21 @@ void CalibrationMode::updateCollecting() {
             // Check if collection is complete
             if (iteration_ >= targetCount_) {
                 Serial.println(F("Collection complete. Calculating..."));
-                state_ = CalibState::CALCULATING;
+                if (state_ == CalibState::COLLECTING_ELLIPSOID) {
+                    state_ = CalibState::CALCULATING_ELLIPSOID;
+                } else if (isShortCal_) {
+                    state_ = CalibState::CALCULATING_SHORT;
+                } else {
+                    state_ = CalibState::CALCULATING_ALIGNMENT;
+                }
             }
         }
     }
 }
 
-// ── State: CALCULATING ──────────────────────────────────────────────
+// ── State: CALCULATING_ELLIPSOID ────────────────────────────────────
 
-void CalibrationMode::updateCalculating() {
+void CalibrationMode::updateCalculatingEllipsoid() {
     // Show calculating message
     auto& d = disp_->getDisplay();
     d.clearDisplay();
@@ -201,11 +219,51 @@ void CalibrationMode::updateCalculating() {
     d.print(F("Calculating..."));
     d.display();
 
-    if (isEllipsoidMode_) {
-        calculateEllipsoid();
-    } else {
-        calculateAlignment();
-    }
+    calculateEllipsoid();
+
+    // Transition to alignment phase
+    Serial.println(F("Ellipsoid done. Moving to alignment phase."));
+    state_ = CalibState::INTRO_ALIGNMENT;
+    showAlignmentIntro();
+}
+
+// ── State: CALCULATING_ALIGNMENT ────────────────────────────────────
+
+void CalibrationMode::updateCalculatingAlignment() {
+    // Show calculating message
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+    d.setTextSize(2);
+    d.setCursor(0, 50);
+    d.print(F("Calculating..."));
+    d.display();
+
+    calculateAlignment();
+
+    state_ = CalibState::SHOW_RESULTS;
+    showResultsScreen();
+}
+
+// ── State: CALCULATING_SHORT ────────────────────────────────────────
+
+void CalibrationMode::updateCalculatingShort() {
+    // Show calculating message
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+    d.setTextSize(2);
+    d.setCursor(0, 50);
+    d.print(F("Calculating..."));
+    d.display();
+
+    // Step 1: Update ellipsoid with the 24 alignment points
+    Serial.println(F("Short cal: updating ellipsoid with 24 points..."));
+    calculateEllipsoid();
+
+    // Step 2: Run alignment on the same 24 points
+    Serial.println(F("Short cal: running alignment..."));
+    calculateAlignment();
 
     state_ = CalibState::SHOW_RESULTS;
     showResultsScreen();
@@ -328,7 +386,7 @@ void CalibrationMode::updateCoverageBar(const Eigen::Vector3f& grav) {
 // All calibration screens draw directly to the OLED via getDisplay()
 // to avoid the measurement-layout template from DisplayManager::refresh().
 
-void CalibrationMode::showChoiceScreen() {
+void CalibrationMode::showEllipsoidIntro() {
     auto& d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
@@ -337,22 +395,46 @@ void CalibrationMode::showChoiceScreen() {
     d.setTextSize(2);
     d.setCursor(0, 0);
     d.println(F("Calibrate"));
+    d.println(F("Phase 1"));
 
-    // Option 1
-    d.setCursor(0, 30);
+    // Instructions
     d.setTextSize(1);
-    d.print(F("Button 1:"));
     d.setCursor(0, 44);
-    d.setTextSize(2);
-    d.print(F("Ellipsoid"));
+    d.println(F("Take 56 readings in a"));
+    d.println(F("diverse range of"));
+    d.println(F("directions and"));
+    d.println(F("orientations."));
 
-    // Option 2
-    d.setCursor(0, 72);
-    d.setTextSize(1);
-    d.print(F("Button 2:"));
-    d.setCursor(0, 86);
+    // Dismiss prompt
+    d.setCursor(0, 110);
+    d.print(F("Press any button..."));
+
+    d.display();
+}
+
+void CalibrationMode::showAlignmentIntro() {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+
+    // Title
     d.setTextSize(2);
-    d.print(F("Alignment"));
+    d.setCursor(0, 0);
+    d.println(F("Calibrate"));
+    d.println(F("Phase 2"));
+
+    // Instructions
+    d.setTextSize(1);
+    d.setCursor(0, 44);
+    d.println(F("Take 3 sets of 8"));
+    d.println(F("readings, barrel roll"));
+    d.println(F("the laser around a"));
+    d.println(F("single point for each"));
+    d.println(F("set of 8."));
+
+    // Dismiss prompt
+    d.setCursor(0, 110);
+    d.print(F("Press any button..."));
 
     d.display();
 }
@@ -473,40 +555,33 @@ void CalibrationMode::showResultsScreen() {
     d.println(F("Results"));
 
     char buf[24];
-    if (isEllipsoidMode_) {
-        d.setTextSize(1);
-        d.setCursor(0, 28);
-        snprintf(buf, sizeof(buf), "Mag:  %.4f", (double)resultMagAcc_);
-        d.println(buf);
-        d.setCursor(0, 40);
-        snprintf(buf, sizeof(buf), "Grav: %.4f", (double)resultGravAcc_);
-        d.println(buf);
 
-        Serial.print(F("Ellipsoid result — Mag: "));
-        Serial.print(resultMagAcc_, 4);
-        Serial.print(F("  Grav: "));
-        Serial.println(resultGravAcc_, 4);
-    } else {
-        d.setTextSize(1);
-        d.setCursor(0, 28);
-        d.print(F("Accuracy:"));
-        d.setTextSize(2);
-        d.setCursor(0, 42);
-        snprintf(buf, sizeof(buf), "%.2f deg", (double)resultAccuracy_);
-        d.print(buf);
+    // Show both ellipsoid uniformity and alignment accuracy
+    d.setTextSize(1);
+    d.setCursor(0, 28);
+    snprintf(buf, sizeof(buf), "Mag:  %.4f", (double)resultMagAcc_);
+    d.println(buf);
+    d.setCursor(0, 40);
+    snprintf(buf, sizeof(buf), "Grav: %.4f", (double)resultGravAcc_);
+    d.println(buf);
+    d.setCursor(0, 52);
+    snprintf(buf, sizeof(buf), "Acc:  %.2f deg", (double)resultAccuracy_);
+    d.println(buf);
 
-        Serial.print(F("Alignment accuracy: "));
-        Serial.print(resultAccuracy_, 3);
-        Serial.println(F(" deg (target < 1.0)"));
-    }
+    Serial.print(F("Results — Mag: "));
+    Serial.print(resultMagAcc_, 4);
+    Serial.print(F("  Grav: "));
+    Serial.print(resultGravAcc_, 4);
+    Serial.print(F("  Accuracy: "));
+    Serial.print(resultAccuracy_, 3);
+    Serial.println(F(" deg"));
 
     // Save/discard instructions
-    d.setTextSize(1);
-    d.setCursor(0, 80);
+    d.setCursor(0, 72);
     d.println(F("Hold B1+B2: Save"));
-    d.setCursor(0, 92);
+    d.setCursor(0, 84);
     d.println(F("Hold B2: Discard"));
-    d.setCursor(0, 108);
+    d.setCursor(0, 100);
     d.println(F("Lower = Better"));
 
     d.display();

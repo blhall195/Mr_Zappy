@@ -4,7 +4,7 @@
 
 // ── Button pins (all active LOW with internal pull-ups) ─────────────
 constexpr uint8_t PIN_BTN_MEASURE  = A3;   // Button 1 — take measurement
-constexpr uint8_t PIN_BTN_DISCO    = A4;   // Button 2 — toggle disco / hold for snake
+constexpr uint8_t PIN_BTN_DISCO    = A4;   // Button 2 — quick shot / hold 3s for disco
 constexpr uint8_t PIN_BTN_CALIB    = A0;   // Button 3 — hold for calibration menu
 constexpr uint8_t PIN_BTN_SHUTDOWN = A1;   // Button 4 — power off
 constexpr uint8_t PIN_BTN_FIRE     = 4;    // D4 — fire/trigger button
@@ -61,6 +61,7 @@ namespace Defaults {
     constexpr float    legAngleTolerance     = 1.7f;    // degrees
     constexpr float    legDistanceTolerance  = 0.05f;   // meters
     constexpr float    laserDistanceOffset   = 0.14f;   // meters (device length)
+    constexpr float    quickShotStabilityTol = 1.0f;    // degrees (wider for quick shot)
     constexpr uint32_t autoShutdownTimeout   = 1800;    // seconds (30 min)
     constexpr uint32_t laserTimeout          = 120;     // seconds (2 min)
 }
@@ -80,6 +81,7 @@ namespace Timing {
     constexpr uint32_t LOOP_INTERVAL_MS         = 10;     // main loop pace
     constexpr float    BATTERY_SHUTDOWN_PCT     = 5.0f;
     constexpr uint32_t CALIB_HOLD_MS            = 1000;   // 1s hold for menu
+    constexpr uint32_t DISCO_HOLD_MS            = 2000;   // 2s hold for disco toggle
     constexpr uint32_t SNAKE_HOLD_MS            = 5000;   // 5s hold for snake
     constexpr uint32_t MEASURE_GUARD_MS         = 1500;   // post-measure lockout
 }

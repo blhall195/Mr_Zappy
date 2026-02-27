@@ -15,6 +15,7 @@
 #include "disco_manager.h"
 #include "menu_manager.h"
 #include "calibration_mode.h"
+#include "snake_game.h"
 
 // ── Embedded calibration data ──────────────────────────────────────
 // From Main board/calibration_dict.json — loaded at startup
@@ -80,6 +81,7 @@ ConfigManager       configMgr;
 DiscoManager        disco;
 MenuManager         menuMgr;
 CalibrationMode     calMode;
+SnakeGame           snakeGame;
 
 bool magOk   = false;
 bool imuOk   = false;
@@ -91,12 +93,18 @@ bool calOk   = false;
 bool flashOk = false;
 static bool enterMenuMode  = false;
 static bool enterCalibMode = false;
+static bool enterSnakeMode = false;
 
 // Latest sensor readings
 static float lastMagX = 0, lastMagY = 0, lastMagZ = 0;
 static float lastAccX = 0, lastAccY = 0, lastAccZ = 0;
 
 static float lastDistance = 0;
+
+// ── Display deadband (prevents ±0.1 flicker when stationary) ────────
+static float dispAz   = 0.0f;   // currently displayed azimuth
+static float dispInc  = 0.0f;   // currently displayed inclination
+static constexpr float DEADBAND_ANGLE = 0.15f;  // degrees
 
 // ── Timing statics ──────────────────────────────────────────────────
 static uint32_t lastSensorUpdate    = 0;
@@ -109,8 +117,9 @@ static uint32_t lastAutoShutCheck   = 0;
 static uint32_t lastLaserTimeCheck  = 0;
 
 // ── Button hold detection ───────────────────────────────────────────
-static uint32_t discoHoldStart = 0;
-static bool     discoHolding   = false;
+static uint32_t discoHoldStart   = 0;
+static bool     discoHolding     = false;
+static bool     discoTriggered   = false;  // true once disco toggled during this hold
 static uint32_t calibHoldStart = 0;
 static bool     calibHolding   = false;
 
@@ -240,9 +249,17 @@ void setup() {
                       configMgr, calibration);
     }
 
+    // Enter snake mode if flag was set
+    if (enterSnakeMode && dispOk) {
+        if (laserOk) laser.setLaser(false);
+        snakeGame.begin(display.getDisplay(), buttons, disco);
+    }
+
     ctx.lastActivityTime = millis();
 
-    if (calMode.isActive()) {
+    if (snakeGame.isActive()) {
+        Serial.println(F("Running. Snake mode."));
+    } else if (calMode.isActive()) {
         Serial.println(F("Running. Calibration mode."));
     } else if (menuMgr.isActive()) {
         Serial.println(F("Running. Menu mode."));
@@ -260,6 +277,28 @@ void loop() {
 
     buttons.update();
 
+    // ── Snake mode: SnakeGame owns the loop ──
+    if (snakeGame.isActive()) {
+        if (snakeGame.update()) {
+            // Game finished — return to normal operation
+            Serial.println(F("Snake game ended — returning to normal mode"));
+            disco.turnOff();
+            display.initScreen();
+            if (laserOk) {
+                laser.setLaser(true);
+                delay(25);
+                laser.setBuzzer(true);
+                delay(100);
+                laser.setBuzzer(false);
+                delay(25);
+            }
+            ctx.laserEnabled = true;
+            ctx.lastActivityTime = millis();
+        }
+        delay(Timing::LOOP_INTERVAL_MS);
+        return;
+    }
+
     // ── Menu mode: hand off to MenuManager, skip everything else ──
     if (menuMgr.isActive()) {
         menuMgr.update(buttons);
@@ -268,16 +307,29 @@ void loop() {
     }
 
     // ── Handle menu exit transitions (one-shot) ──
-    if (menuMgr.exitAction() == MenuExitAction::ENTER_CALIB) {
+    if (menuMgr.exitAction() == MenuExitAction::ENTER_LONG_CALIB ||
+        menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB) {
+        bool shortCal = (menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB);
         menuMgr.clearExitAction();
         if (magOk && imuOk && dispOk && laserOk) {
             Serial.println(F("Transitioning: menu → calibration"));
             calMode.begin(buttons, display, disco, laser, mag, imu,
-                          configMgr, calibration);
+                          configMgr, calibration, shortCal);
         } else {
             Serial.println(F("Cannot enter calibration — sensors not ready"));
             display.initScreen();
             ctx.lastActivityTime = millis();
+        }
+        delay(Timing::LOOP_INTERVAL_MS);
+        return;
+    }
+    if (menuMgr.exitAction() == MenuExitAction::ENTER_SNAKE) {
+        menuMgr.clearExitAction();
+        if (dispOk) {
+            Serial.println(F("Transitioning: menu → snake game"));
+            if (laserOk) laser.setLaser(false);
+            ctx.laserEnabled = false;
+            snakeGame.begin(display.getDisplay(), buttons, disco);
         }
         delay(Timing::LOOP_INTERVAL_MS);
         return;
@@ -303,6 +355,13 @@ void loop() {
         bool done = calMode.update();
         if (done) {
             Serial.println(F("Calibration mode finished."));
+            // Drain buttons held during save/discard (DISCO or MEASURE+DISCO)
+            // to prevent pollButtons() treating the release as a disco toggle.
+            while (buttons.isPressed(Button::DISCO) ||
+                   buttons.isPressed(Button::MEASURE)) {
+                buttons.update();
+                delay(Timing::LOOP_INTERVAL_MS);
+            }
             calOk = calibration.isCalibrated();
             if (calOk) {
                 sensorMgr.init(&calibration, ctx.config.emaAlpha,
@@ -382,14 +441,9 @@ static void pollButtons(uint32_t now) {
         ctx.purpleLatched = false;
         ctx.lastActivityTime = now;
 
-        if (ctx.laserEnabled) {
-            // Laser already on — just enter measurement state, no UART needed
-            ctx.currentState = SystemState::TAKING_MEASUREMENT;
-            ctx.measurementTaken = false;
-            measRedLedSet = false;
-            Serial.println(F("MEASURE: taking measurement"));
-        } else if (ctx.currentState == SystemState::IDLE) {
-            // Laser was off — beep + turn on
+        if (ctx.displayFrozen && !ctx.laserEnabled) {
+            // Leg complete — laser off, just unfreeze + turn laser on
+            ctx.displayFrozen = false;
             if (laserOk) {
                 laser.setBuzzer(true);
                 delay(25);
@@ -399,6 +453,36 @@ static void pollButtons(uint32_t now) {
                 delay(25);
             }
             ctx.laserEnabled = true;
+            lastDistance = 0;
+            disco.turnOff();
+            Serial.println(F("MEASURE: unfreezing after leg, live readings"));
+        } else if (ctx.displayFrozen && ctx.laserEnabled) {
+            // Normal shot freeze — laser is on, go straight to measurement
+            ctx.displayFrozen = false;
+            ctx.currentState = SystemState::TAKING_MEASUREMENT;
+            ctx.measurementTaken = false;
+            measRedLedSet = false;
+            lastDistance = 0;
+            Serial.println(F("MEASURE: taking measurement (from frozen)"));
+        } else if (ctx.laserEnabled) {
+            // Laser already on, live display — take measurement
+            ctx.currentState = SystemState::TAKING_MEASUREMENT;
+            ctx.measurementTaken = false;
+            measRedLedSet = false;
+            lastDistance = 0;
+            Serial.println(F("MEASURE: taking measurement"));
+        } else if (ctx.currentState == SystemState::IDLE) {
+            // Laser was off (timeout etc) — beep + turn on
+            if (laserOk) {
+                laser.setBuzzer(true);
+                delay(25);
+                laser.setLaser(true);
+                delay(200);
+                laser.setBuzzer(false);
+                delay(25);
+            }
+            ctx.laserEnabled = true;
+            lastDistance = 0;
             Serial.println(F("MEASURE: laser re-enabled"));
         } else {
             Serial.println(F("MEASURE: system busy, ignored"));
@@ -406,29 +490,18 @@ static void pollButtons(uint32_t now) {
         }
     }
 
-    // ── Button 2 (DISCO) — short press: toggle disco, hold 5s: snake ──
+    // ── Button 2 (DISCO) — short press: quick shot, hold 2s: toggle disco ──
     if (buttons.isPressed(Button::DISCO)) {
         ctx.lastActivityTime = now;
         if (!discoHolding) {
             discoHoldStart = now;
-            discoHolding = true;
-        } else {
+            discoHolding   = true;
+            discoTriggered = false;
+        } else if (!discoTriggered) {
             uint32_t held = now - discoHoldStart;
-            if (held >= Timing::SNAKE_HOLD_MS &&
-                ctx.currentState == SystemState::IDLE) {
-                Serial.println(F("DISCO held 5s — launching snake mode"));
-                if (laserOk) laser.setLaser(false);
-                disco.turnOff();
-                ctx.discoOn = false;
-                if (flashOk) configMgr.writeFlag(Flags::SNAKE);
-                NVIC_SystemReset();
-            }
-        }
-    } else {
-        // Released — check for short press
-        if (discoHolding) {
-            uint32_t held = now - discoHoldStart;
-            if (held < Timing::SNAKE_HOLD_MS) {
+            if (held >= Timing::DISCO_HOLD_MS) {
+                // 2s hold reached — toggle disco now
+                discoTriggered = true;
                 if (ctx.discoOn) {
                     disco.turnOff();
                     ctx.discoOn = false;
@@ -443,8 +516,59 @@ static void pollButtons(uint32_t now) {
                     Serial.println(F("DISCO: on"));
                 }
             }
-            discoHolding = false;
         }
+    } else {
+        // Released — only fire quick shot if disco wasn't triggered
+        if (discoHolding && !discoTriggered) {
+                // Short press — quick shot (wider stability tolerance)
+                ctx.purpleLatched = false;
+
+                if (ctx.displayFrozen && !ctx.laserEnabled) {
+                    // Leg complete — just unfreeze + turn laser on
+                    ctx.displayFrozen = false;
+                    if (laserOk) {
+                        laser.setBuzzer(true);
+                        delay(25);
+                        laser.setLaser(true);
+                        delay(200);
+                        laser.setBuzzer(false);
+                        delay(25);
+                    }
+                    ctx.laserEnabled = true;
+                    lastDistance = 0;
+                    disco.turnOff();
+                    Serial.println(F("QUICK: unfreezing after leg, live readings"));
+                } else if (ctx.displayFrozen && ctx.laserEnabled) {
+                    ctx.displayFrozen = false;
+                    ctx.quickShot = true;
+                    ctx.currentState = SystemState::TAKING_MEASUREMENT;
+                    ctx.measurementTaken = false;
+                    measRedLedSet = false;
+                    lastDistance = 0;
+                    Serial.println(F("QUICK: taking measurement (from frozen)"));
+                } else if (ctx.laserEnabled) {
+                    ctx.quickShot = true;
+                    ctx.currentState = SystemState::TAKING_MEASUREMENT;
+                    ctx.measurementTaken = false;
+                    measRedLedSet = false;
+                    lastDistance = 0;
+                    Serial.println(F("QUICK: taking measurement"));
+                } else if (ctx.currentState == SystemState::IDLE) {
+                    // Laser was off — re-enable
+                    if (laserOk) {
+                        laser.setBuzzer(true);
+                        delay(25);
+                        laser.setLaser(true);
+                        delay(200);
+                        laser.setBuzzer(false);
+                        delay(25);
+                    }
+                    ctx.laserEnabled = true;
+                    lastDistance = 0;
+                    Serial.println(F("QUICK: laser re-enabled"));
+                }
+        }
+        discoHolding = false;
     }
 
     // ── Button 3 (CALIB) — hold 2s: enter menu mode ──
@@ -487,11 +611,35 @@ static void pollButtons(uint32_t now) {
         ctx.purpleLatched = false;
         ctx.lastActivityTime = now;
 
-        if (ctx.laserEnabled) {
-            // Laser already on — just enter measurement state
+        if (ctx.displayFrozen && !ctx.laserEnabled) {
+            // Leg complete — laser off, just unfreeze + turn laser on
+            ctx.displayFrozen = false;
+            if (laserOk) {
+                laser.setBuzzer(true);
+                delay(25);
+                laser.setLaser(true);
+                delay(200);
+                laser.setBuzzer(false);
+                delay(25);
+            }
+            ctx.laserEnabled = true;
+            lastDistance = 0;
+            disco.turnOff();
+            Serial.println(F("FIRE: unfreezing after leg, live readings"));
+        } else if (ctx.displayFrozen && ctx.laserEnabled) {
+            // Normal shot freeze — laser is on, go straight to measurement
+            ctx.displayFrozen = false;
             ctx.currentState = SystemState::TAKING_MEASUREMENT;
             ctx.measurementTaken = false;
             measRedLedSet = false;
+            lastDistance = 0;
+            Serial.println(F("FIRE: taking measurement (from frozen)"));
+        } else if (ctx.laserEnabled) {
+            // Laser already on, live display — take measurement
+            ctx.currentState = SystemState::TAKING_MEASUREMENT;
+            ctx.measurementTaken = false;
+            measRedLedSet = false;
+            lastDistance = 0;
             Serial.println(F("FIRE: taking measurement"));
         } else if (ctx.currentState == SystemState::IDLE) {
             if (laserOk) {
@@ -503,6 +651,7 @@ static void pollButtons(uint32_t now) {
                 delay(25);
             }
             ctx.laserEnabled = true;
+            lastDistance = 0;
             Serial.println(F("FIRE: laser re-enabled"));
         }
     }
@@ -514,6 +663,7 @@ static void pollMeasurement(uint32_t now) {
     if (ctx.measurementTaken) return;
     if (!calOk || !magOk || !imuOk || !laserOk) {
         Serial.println(F("MEAS: sensors not ready"));
+        ctx.quickShot = false;
         ctx.currentState = SystemState::IDLE;
         return;
     }
@@ -539,8 +689,10 @@ static void pollMeasurement(uint32_t now) {
         measRedLedSet = true;
     }
 
-    // Wait for stability — debug print every ~1s so we know it's alive
-    if (!sensorMgr.isStable(ctx.config.stabilityTolerance)) {
+    // Wait for stability — use wider tolerance for quick shot
+    float stabTol = ctx.quickShot ? Defaults::quickShotStabilityTol
+                                  : ctx.config.stabilityTolerance;
+    if (!sensorMgr.isStable(stabTol)) {
         static uint32_t lastStabDbg = 0;
         uint32_t n = millis();
         if (n - lastStabDbg > 1000) {
@@ -550,7 +702,7 @@ static void pollMeasurement(uint32_t now) {
             Serial.print(F(" INC="));
             Serial.print(sensorMgr.getInclination(), 1);
             Serial.print(F(" tol="));
-            Serial.println(ctx.config.stabilityTolerance, 1);
+            Serial.println(stabTol, 1);
         }
         return;
     }
@@ -578,6 +730,7 @@ static void pollMeasurement(uint32_t now) {
         Serial.println(LaserEgismos::errorString(lErr));
         resetLaser();
         alertError("LzrERR");
+        ctx.quickShot = false;
         ctx.currentState = SystemState::IDLE;
         return;
     }
@@ -614,6 +767,7 @@ static void pollMeasurement(uint32_t now) {
                                              ctx.readings.inclination);
                 display.refresh();
             }
+            ctx.quickShot = false;
             ctx.currentState = SystemState::IDLE;
             return;
         }
@@ -624,7 +778,7 @@ static void pollMeasurement(uint32_t now) {
     handleMeasurementSuccess();
     Serial.println(F("MEAS: handleSuccess done"));
 
-    // Update display
+    // Update display with shot readings
     if (dispOk) {
         display.updateSensorReadings(ctx.readings.distance,
                                      ctx.readings.azimuth,
@@ -632,15 +786,24 @@ static void pollMeasurement(uint32_t now) {
         display.refresh();
     }
 
-    // Turn laser off — display freezes with last readings shown.
-    // Next button press will re-enable laser + live display.
-    if (laserOk) laser.setLaser(false);
-    ctx.laserEnabled = false;
+    // Freeze display — stays showing shot readings until next button press
+    ctx.displayFrozen = true;
 
-    if (!ctx.purpleLatched) {
+    if (ctx.purpleLatched) {
+        // Leg complete — laser off until user presses button again
+        if (laserOk) laser.setLaser(false);
+        ctx.laserEnabled = false;
+    } else {
+        // Normal shot — blink laser off 500ms then back on, ready for next shot
+        if (laserOk) laser.setLaser(false);
+        ctx.laserEnabled = false;
+        delay(500);
+        if (laserOk) laser.setLaser(true);
+        ctx.laserEnabled = true;
         disco.turnOff();
     }
 
+    ctx.quickShot = false;
     ctx.currentState = SystemState::IDLE;
 
     Serial.print(F("MEAS OK: AZ="));
@@ -689,7 +852,12 @@ static void handleMeasurementSuccess() {
                                        ctx.readings.distance);
     }
 
-    // ── Leg consistency buffer ────────────────────────────────
+    // ── Leg consistency buffer (skip for quick shots) ─────────
+    if (ctx.quickShot) {
+        Serial.println(F("  HS:3 quick shot — skipping leg buf"));
+        ctx.measurementTaken = false;
+        return;
+    }
     Serial.println(F("  HS:3 leg buf")); Serial.flush();
     uint8_t idx = ctx.stableBufCount;
     if (idx < 3) {
@@ -947,22 +1115,29 @@ static void updateDisplay(uint32_t now) {
     if (now - lastDisplayRefresh < Timing::DISPLAY_REFRESH_MS) return;
     lastDisplayRefresh = now;
 
-    // Only update live sensor readings when laser is on.
-    // After a measurement the laser is off and the display stays frozen
-    // showing the last reading until the user presses MEASURE again.
-    if (ctx.laserEnabled) {
+    // Only update live sensor readings when display is not frozen.
+    // After a measurement the display stays frozen showing the shot
+    // reading until the user presses MEASURE again to resume live mode.
+    if (!ctx.displayFrozen) {
+        float liveAz, liveInc;
         if (calOk) {
-            display.updateSensorReadings(lastDistance,
-                                         sensorMgr.getAzimuth(),
-                                         sensorMgr.getInclination());
+            liveAz  = sensorMgr.getAzimuth();
+            liveInc = sensorMgr.getInclination();
         } else {
-            float heading = atan2f(lastMagY, lastMagX) * (180.0f / PI);
-            if (heading < 0) heading += 360.0f;
-            float tilt = atan2f(lastAccZ,
-                         sqrtf(lastAccX * lastAccX + lastAccY * lastAccY))
-                         * (180.0f / PI);
-            display.updateSensorReadings(lastDistance, heading, tilt);
+            liveAz = atan2f(lastMagY, lastMagX) * (180.0f / PI);
+            if (liveAz < 0) liveAz += 360.0f;
+            liveInc = atan2f(lastAccZ,
+                      sqrtf(lastAccX * lastAccX + lastAccY * lastAccY))
+                      * (180.0f / PI);
         }
+
+        // Deadband: only update displayed value when reading moves enough
+        if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
+            dispAz = liveAz;
+        if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
+            dispInc = liveInc;
+
+        display.updateSensorReadings(lastDistance, dispAz, dispInc);
     }
 
     display.updateBattery(lastBatPct);
@@ -1171,6 +1346,7 @@ static void initFlash() {
         if (configMgr.hasFlag(Flags::SNAKE)) {
             configMgr.clearFlag(Flags::SNAKE);
             Serial.println(F("  ** Snake mode flag detected"));
+            enterSnakeMode = true;
         }
     }
 

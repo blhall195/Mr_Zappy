@@ -23,7 +23,13 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git rm:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run:*)",
+      "Bash(git checkout:*)",
+      "Bash(\"C:/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" run --target upload)",
+      "Bash(~/.platformio/penv/Scripts/platformio run)",
+      "Bash(~/.platformio/penv/Scripts/platformio run --target upload)",
+      "Bash(ls -d */)"
     ]
   }
 }
