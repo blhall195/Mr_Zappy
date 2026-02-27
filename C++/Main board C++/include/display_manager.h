@@ -46,7 +46,8 @@ public:
     void showInitialisingMessage();
 
     /// Show boot splash with laser beam on or off
-    void showSplash(bool laserOn);
+    /// nameSuffix: if non-null, shown instead of "Initialising..."
+    void showSplash(bool laserOn, const char* nameSuffix = nullptr);
 
     /// Push buffer to OLED (call after updates)
     void refresh();

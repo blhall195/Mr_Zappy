@@ -89,15 +89,15 @@ void MenuManager::buildMenu() {
     _deleteSub.init(*_display, "Delete saved shots");
     _laserSub.init(*_display, _laserLabel);
     _shutdownSub.init(*_display, _shutdownLabel);
-    _bootloaderSub.init(*_display, "Update Firmware");
+    _bootloaderSub.init(*_display, "Update / Settings");
 
-    // ── Root menu items ──────────────────────────────────────────
+    // ── Root menu items ────────────────────────────────
     _root.addSubmenu("Enter Calibration", &_calSub);
     _root.addSubmenu(_anomalyLabel, &_anomalySub);
     _root.addSubmenu("Delete saved shots", &_deleteSub);
     _root.addSubmenu(_laserLabel, &_laserSub);
     _root.addSubmenu(_shutdownLabel, &_shutdownSub);
-    _root.addSubmenu("Update Firmware", &_bootloaderSub);
+    _root.addSubmenu("Update / Settings", &_bootloaderSub);
     _root.addAction("Play Snake", enterSnakeGame);
     _root.addAction("Exit", exitMenu);
 
@@ -134,9 +134,9 @@ void MenuManager::buildMenu() {
     _shutdownSub.addAction("2 hr",   setAutoShutdown, 7200);
     _shutdownSub.addAction("<- Back", goToRoot);
 
-    // ── Update Firmware submenu ────────────────────────────────
-    _bootloaderSub.addAction("No", goToRoot);
-    _bootloaderSub.addAction("Yes", enterBootloader);
+    // ── Update / Settings submenu (direct actions, no confirmation) ──
+    _bootloaderSub.addAction("Update Firmware", enterBootloader);
+    _bootloaderSub.addAction("Edit Settings File", enterUsbDrive);
     _bootloaderSub.addAction("<- Back", goToRoot);
 }
 
@@ -209,6 +209,13 @@ void MenuManager::enterBootloader(int) {
     Serial.println(F("Menu: entering bootloader for firmware update"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_BOOTLOADER;
+}
+
+void MenuManager::enterUsbDrive(int) {
+    if (!s_instance) return;
+    Serial.println(F("Menu: entering USB drive mode for settings"));
+    s_instance->_active = false;
+    s_instance->_exitAction = MenuExitAction::ENTER_USB_DRIVE;
 }
 
 void MenuManager::enterSnakeGame(int) {
