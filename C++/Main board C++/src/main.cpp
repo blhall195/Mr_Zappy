@@ -116,6 +116,14 @@ static uint32_t lastBleUartPoll     = 0;
 static uint32_t lastAutoShutCheck   = 0;
 static uint32_t lastLaserTimeCheck  = 0;
 
+// ── BLE startup name sync retry ────────────────────────────────────
+static uint32_t bleNameSyncStartMs      = 0;
+static uint32_t bleNameSyncLastSendMs   = 0;
+static uint8_t  bleNameSyncAttempts     = 0;
+static bool     bleNameSyncDone         = false;
+static bool     bleReadySeen            = false;
+static bool     bleNameSentAfterReady   = false;
+
 // ── Button hold detection ───────────────────────────────────────────
 static uint32_t discoHoldStart   = 0;
 static bool     discoHolding     = false;
@@ -146,6 +154,7 @@ static void pollButtons(uint32_t now);
 static void pollMeasurement(uint32_t now);
 static void pollBLEPin(uint32_t now);
 static void pollBLECommands(uint32_t now);
+static void pollBLEStartupNameSync(uint32_t now);
 static void pollBattery(uint32_t now);
 static void checkAutoShutoff(uint32_t now);
 static void checkLaserTimeout(uint32_t now);
@@ -278,10 +287,8 @@ void setup() {
         display.updateBTNumber(ctx.bleDisconnectionCounter);
     }
 
-    // ── BLE device name ──────────────────────────────────────────
-    if (bleOk) {
-        ble.setName("SAP6_Unicorn");
-    }
+    // ── BLE device name sync is retried from loop() to avoid boot races ──
+    bleNameSyncStartMs = millis();
 
     // ── Check for boot mode overrides ────────────────────────────
     buttons.update();
@@ -330,6 +337,9 @@ void loop() {
     uint32_t now = millis();
 
     buttons.update();
+
+    // Retries NAME sync after boot so BLE board has time to finish setup.
+    pollBLEStartupNameSync(now);
 
     // ── Snake mode: SnakeGame owns the loop ──
     if (snakeGame.isActive()) {
@@ -1098,6 +1108,10 @@ static void pollBLECommands(uint32_t now) {
             ctx.bleReadingsTransferredFlag = true;
             break;
 
+        case BleCommand::READY:
+            bleReadySeen = true;
+            break;
+
         case BleCommand::TAKE_SHOT:
             ctx.currentState = SystemState::TAKING_MEASUREMENT;
             ctx.measurementTaken = false;
@@ -1134,6 +1148,58 @@ static void pollBLECommands(uint32_t now) {
 
         default:
             break;
+    }
+}
+
+// ── BLE startup name sync (robust against faster main-board boot) ──
+static void pollBLEStartupNameSync(uint32_t now) {
+    if (!bleOk || bleNameSyncDone) return;
+
+    constexpr uint32_t NAME_SYNC_INITIAL_DELAY_MS = 1200;
+    constexpr uint32_t NAME_SYNC_RETRY_MS         = 800;
+    constexpr uint32_t NAME_SYNC_AFTER_READY_MS   = 150;
+    constexpr uint8_t  NAME_SYNC_MAX_ATTEMPTS     = 6;
+
+    uint32_t elapsed = now - bleNameSyncStartMs;
+    if (elapsed < NAME_SYNC_INITIAL_DELAY_MS) return;
+    if (bleNameSyncAttempts >= NAME_SYNC_MAX_ATTEMPTS) {
+        bleNameSyncDone = true;
+        Serial.println(F("BLE NAME: sync window ended"));
+        return;
+    }
+
+    // If DiscoX reports READY, force one post-ready NAME send and stop.
+    if (bleReadySeen && !bleNameSentAfterReady) {
+        if (bleNameSyncLastSendMs != 0 &&
+            (now - bleNameSyncLastSendMs) < NAME_SYNC_AFTER_READY_MS) {
+            return;
+        }
+
+        ble.setName("SAP6_Unicorn");
+        bleNameSyncLastSendMs = now;
+        bleNameSyncAttempts++;
+        bleNameSentAfterReady = true;
+        bleNameSyncDone = true;
+        Serial.println(F("BLE NAME: sync complete (READY)"));
+        return;
+    }
+
+    if (bleNameSyncLastSendMs != 0 &&
+        (now - bleNameSyncLastSendMs) < NAME_SYNC_RETRY_MS) {
+        return;
+    }
+
+    ble.setName("SAP6_Unicorn");
+    bleNameSyncLastSendMs = now;
+    bleNameSyncAttempts++;
+
+    Serial.print(F("BLE NAME: sync attempt "));
+    Serial.println(bleNameSyncAttempts);
+
+    // If BLE comes up and we sent at least once, stop retrying (fallback path).
+    if (ctx.bleConnected && bleNameSyncAttempts >= 1) {
+        bleNameSyncDone = true;
+        Serial.println(F("BLE NAME: sync complete"));
     }
 }
 
