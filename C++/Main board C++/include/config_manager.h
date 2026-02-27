@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include "device_context.h"
 
+class Adafruit_SPIFlash;  // forward declaration for USB MSC
 namespace MagCal { struct CalibrationBinary; }
 
 // Boot-mode flag names
@@ -19,6 +20,9 @@ public:
     bool begin();
 
     bool isReady() const { return mounted_; }
+
+    // Expose the internal QSPI flash object (for USB MSC block callbacks)
+    Adafruit_SPIFlash* getFlash();
 
     // ── Settings persistence ────────────────────────────────────────
 

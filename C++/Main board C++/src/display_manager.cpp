@@ -120,7 +120,7 @@ void DisplayManager::showInitialisingMessage() {
     _display.display();
 }
 
-void DisplayManager::showSplash(bool laserOn) {
+void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
     if (!_initialized) return;
 
     _display.clearDisplay();
@@ -225,10 +225,14 @@ void DisplayManager::showSplash(bool laserOn) {
         _display.fillCircle(STAR_CX, STAR_CY, 2, SH110X_WHITE);
     }
 
-    // ── "Initialising..." text ────────────────────────────────────
-    _display.setTextSize(1);
-    _display.setCursor(12, 108);
-    _display.print(F("Initialising..."));
+    // ── Bottom text: BLE name suffix (blank until config loaded) ───
+    if (nameSuffix && nameSuffix[0]) {
+        _display.setTextSize(1);
+        // Centre the name suffix on the 128-px wide screen (6px per char at size 1)
+        int16_t tw = (int16_t)strlen(nameSuffix) * 6;
+        _display.setCursor((128 - tw) / 2, 108);
+        _display.print(nameSuffix);
+    }
 
     _display.display();
 }

@@ -14,6 +14,7 @@ enum class MenuExitAction : uint8_t {
     ENTER_SHORT_CALIB,  // enter short calibration mode
     ENTER_SNAKE,        // launch snake game
     ENTER_BOOTLOADER,   // reboot into UF2 bootloader for firmware update
+    ENTER_USB_DRIVE,    // reboot into USB mass storage mode for settings
 };
 
 class MenuManager {
@@ -71,5 +72,6 @@ private:
     static void setAutoShutdown(int value);
     static void enterSnakeGame(int);
     static void enterBootloader(int);
+    static void enterUsbDrive(int);
     static void exitMenu(int);
 };

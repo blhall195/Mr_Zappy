@@ -16,6 +16,8 @@
 #include "menu_manager.h"
 #include "calibration_mode.h"
 #include "snake_game.h"
+#include <Adafruit_TinyUSB.h>
+#include <Adafruit_SPIFlash.h>
 
 // ── Embedded calibration data ──────────────────────────────────────
 // From Main board/calibration_dict.json — loaded at startup
@@ -82,6 +84,7 @@ DiscoManager        disco;
 MenuManager         menuMgr;
 CalibrationMode     calMode;
 SnakeGame           snakeGame;
+Adafruit_USBD_MSC   usbMsc;
 
 bool magOk   = false;
 bool imuOk   = false;
@@ -169,6 +172,7 @@ static float circularDiff(float a, float b);
 static bool bearingsWithinTol(const float* vals, uint8_t n, float tol);
 static bool linearWithinTol(const float* vals, uint8_t n, float tol);
 static void onFlushReading(float az, float inc, float dist);
+static void enterUsbDriveMode();  // USB MSC loop (does not return)
 
 // ═══════════════════════════════════════════════════════════════════
 // ── Setup ─────────────────────────────────────────────────────────
@@ -248,8 +252,12 @@ void setup() {
             if (t < 700)  return false;  // off  200ms
             return true;                 // on   750ms (final hold)
         };
+        // Extract suffix after '_' from BLE name for splash display
+        const char* nameSuffix = strchr(ctx.config.bleName, '_');
+        if (nameSuffix) nameSuffix++;   // skip the '_'
+
         while (millis() - splashStart < 1450) {
-            display.showSplash(splashLaser());
+            display.showSplash(splashLaser(), nameSuffix);
         }
     }
 
@@ -423,6 +431,30 @@ void loop() {
         // SAME51J19A: 192KB RAM at 0x20000000, so end-4 = 0x2002FFFC
         #define BOOT_DOUBLE_TAP_ADDRESS  (0x2002FFFCul)
         *((volatile uint32_t *)BOOT_DOUBLE_TAP_ADDRESS) = 0xf01669efUL;
+        NVIC_SystemReset();
+        // Does not return
+    }
+    if (menuMgr.exitAction() == MenuExitAction::ENTER_USB_DRIVE) {
+        menuMgr.clearExitAction();
+        Serial.println(F("Entering USB drive mode..."));
+        if (dispOk) {
+            auto& d = display.getDisplay();
+            d.clearDisplay();
+            d.setTextSize(1);
+            d.setTextColor(SH110X_WHITE);
+            d.setCursor(0, 10);
+            d.println(F("USB Drive Mode"));
+            d.println();
+            d.println(F("Plug into PC to"));
+            d.println(F("edit config.json"));
+            d.println();
+            d.println(F("Hold power button"));
+            d.println(F("to exit."));
+            d.display();
+        }
+        // Set flag file so USB MSC mode starts after reboot
+        configMgr.writeFlag("usb_drive");
+        delay(1500);
         NVIC_SystemReset();
         // Does not return
     }
@@ -1175,7 +1207,7 @@ static void pollBLEStartupNameSync(uint32_t now) {
             return;
         }
 
-        ble.setName("SAP6_Unicorn");
+        ble.setName(ctx.config.bleName);
         bleNameSyncLastSendMs = now;
         bleNameSyncAttempts++;
         bleNameSentAfterReady = true;
@@ -1189,7 +1221,7 @@ static void pollBLEStartupNameSync(uint32_t now) {
         return;
     }
 
-    ble.setName("SAP6_Unicorn");
+    ble.setName(ctx.config.bleName);
     bleNameSyncLastSendMs = now;
     bleNameSyncAttempts++;
 
@@ -1436,7 +1468,8 @@ static void initFlash() {
         if (configMgr.loadConfig(ctx.config)) {
             Serial.println(F("  Config loaded from flash"));
         } else {
-            Serial.println(F("  No saved config — using defaults"));
+            Serial.println(F("  No saved config — writing defaults"));
+            configMgr.saveConfig(ctx.config);
         }
 
         uint16_t pending = configMgr.countPendingReadings();
@@ -1460,6 +1493,11 @@ static void initFlash() {
             configMgr.clearFlag(Flags::SNAKE);
             Serial.println(F("  ** Snake mode flag detected"));
             enterSnakeMode = true;
+        }
+        if (configMgr.hasFlag("usb_drive")) {
+            configMgr.clearFlag("usb_drive");
+            Serial.println(F("  ** USB drive mode flag detected"));
+            enterUsbDriveMode();  // does not return
         }
     }
 
@@ -1528,4 +1566,70 @@ static void initDisco() {
     disco.begin();
     Serial.println(F("NeoPixel:    OK"));
     Serial.println();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ── USB Mass Storage Drive Mode ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+
+// Block-level callbacks for TinyUSB MSC — forward to QSPI flash
+static Adafruit_SPIFlash* s_mscFlash = nullptr;
+
+static int32_t msc_read_cb(uint32_t lba, void* buffer, uint32_t bufsize) {
+    return s_mscFlash->readBlocks(lba, (uint8_t*)buffer, bufsize / 512)
+           ? (int32_t)bufsize : -1;
+}
+
+static int32_t msc_write_cb(uint32_t lba, uint8_t* buffer, uint32_t bufsize) {
+    return s_mscFlash->writeBlocks(lba, buffer, bufsize / 512)
+           ? (int32_t)bufsize : -1;
+}
+
+static void msc_flush_cb() {
+    s_mscFlash->syncBlocks();
+}
+
+static void enterUsbDriveMode() {
+    Serial.println(F("=== USB Drive Mode ==="));
+
+    // Show OLED message
+    if (dispOk) {
+        auto& d = display.getDisplay();
+        d.clearDisplay();
+        d.setTextSize(1);
+        d.setTextColor(SH110X_WHITE);
+        d.setCursor(0, 10);
+        d.println(F("USB Drive Mode"));
+        d.println();
+        d.println(F("Edit config.json"));
+        d.println(F("on the USB drive."));
+        d.println();
+        d.println(F("Eject drive, then"));
+        d.println(F("hold power button"));
+        d.println(F("to restart."));
+        d.display();
+    }
+
+    // Get pointer to the QSPI flash from ConfigManager
+    s_mscFlash = configMgr.getFlash();
+    if (!s_mscFlash) {
+        Serial.println(F("USB MSC: flash not available!"));
+        NVIC_SystemReset();
+    }
+
+    // Configure USB MSC
+    usbMsc.setID("Mr_Zappy", "Settings", "1.0");
+    usbMsc.setReadWriteCallback(msc_read_cb, msc_write_cb, msc_flush_cb);
+    usbMsc.setCapacity(s_mscFlash->size() / 512, 512);
+    usbMsc.setUnitReady(true);
+    usbMsc.begin();
+
+    Serial.println(F("USB MSC started — waiting for host"));
+
+    // Spin forever — device stays in USB drive mode until power cycled
+    // The power button (LTC2952) will cut power, causing a fresh reboot
+    while (true) {
+        delay(100);
+    }
+    // Does not return
 }

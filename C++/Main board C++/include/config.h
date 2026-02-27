@@ -64,6 +64,8 @@ namespace Defaults {
     constexpr float    quickShotStabilityTol = 1.0f;    // degrees (wider for quick shot)
     constexpr uint32_t autoShutdownTimeout   = 1800;    // seconds (30 min)
     constexpr uint32_t laserTimeout          = 120;     // seconds (2 min)
+    constexpr char     bleName[]             = "SAP6_Unicorn";
+    constexpr uint8_t  bleNameMaxLen         = 20;      // max chars for BLE name
 }
 
 // ── Timing constants ────────────────────────────────────────────────

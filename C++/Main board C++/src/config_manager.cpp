@@ -11,6 +11,11 @@ static Adafruit_FlashTransport_QSPI s_flashTransport;
 static Adafruit_SPIFlash            s_flash(&s_flashTransport);
 static FatVolume                    s_fatfs;
 
+// ── Flash access (for USB MSC) ──────────────────────────────────────
+Adafruit_SPIFlash* ConfigManager::getFlash() {
+    return &s_flash;
+}
+
 // ── begin() ────────────────────────────────────────────────────────
 bool ConfigManager::begin() {
     if (!s_flash.begin()) {
@@ -25,6 +30,51 @@ bool ConfigManager::begin() {
     if (!s_fatfs.begin(&s_flash)) {
         Serial.println(F("FAT mount FAILED — flash may need formatting"));
         return false;
+    }
+
+    // Update volume label from "CIRCUITPY" to "DISCOX" via raw flash sectors.
+    // SdFat File32 doesn't support writing raw dir entries, so we go direct.
+    {
+        static const char NEW_LABEL[11] = {'D','I','S','C','O','X',' ',' ',' ',' ',' '};
+        uint8_t sector[512];
+
+        // 1. Update BPB label in boot sector (offset 43 for FAT12/16)
+        if (s_flash.readBlocks(0, sector, 1)) {
+            if (memcmp(sector + 43, NEW_LABEL, 11) != 0) {
+                memcpy(sector + 43, NEW_LABEL, 11);
+                s_flash.writeBlocks(0, sector, 1);
+                s_flash.syncBlocks();
+                Serial.println(F("  BPB volume label → DISCOX"));
+            }
+
+            // 2. Update root directory volume label entry.
+            //    Root dir starts at: reserved + (num_fats * sectors_per_fat)
+            uint16_t reserved   = sector[14] | (sector[15] << 8);
+            uint8_t  numFats    = sector[16];
+            uint16_t fatSectors = sector[22] | (sector[23] << 8);
+            uint32_t rootStart  = reserved + ((uint32_t)numFats * fatSectors);
+            uint16_t rootEntries = sector[17] | (sector[18] << 8);
+            uint16_t rootSectors = ((rootEntries * 32) + 511) / 512;
+
+            for (uint32_t rs = 0; rs < rootSectors; rs++) {
+                if (!s_flash.readBlocks(rootStart + rs, sector, 1)) break;
+                for (uint16_t off = 0; off < 512; off += 32) {
+                    uint8_t* entry = sector + off;
+                    if (entry[0] == 0x00) goto labelDone;   // end of dir
+                    if (entry[0] == 0xE5) continue;          // deleted
+                    if (entry[11] == 0x08) {                  // volume label attr
+                        if (memcmp(entry, NEW_LABEL, 11) != 0) {
+                            memcpy(entry, NEW_LABEL, 11);
+                            s_flash.writeBlocks(rootStart + rs, sector, 1);
+                            s_flash.syncBlocks();
+                            Serial.println(F("  Root dir label → DISCOX"));
+                        }
+                        goto labelDone;
+                    }
+                }
+            }
+            labelDone:;
+        }
     }
 
     // Ensure /flags directory exists
@@ -72,6 +122,10 @@ bool ConfigManager::loadConfig(Config& cfg) {
     cfg.autoShutdownTimeout   = doc["auto_shutdown_timeout"]   | Defaults::autoShutdownTimeout;
     cfg.laserTimeout          = doc["laser_timeout"]           | Defaults::laserTimeout;
 
+    const char* name = doc["ble_name"] | Defaults::bleName;
+    strncpy(cfg.bleName, name, Defaults::bleNameMaxLen);
+    cfg.bleName[Defaults::bleNameMaxLen] = '\0';
+
     return true;
 }
 
@@ -97,6 +151,7 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["laser_distance_offset"]  = cfg.laserDistanceOffset;
     doc["auto_shutdown_timeout"]  = cfg.autoShutdownTimeout;
     doc["laser_timeout"]          = cfg.laserTimeout;
+    doc["ble_name"]               = cfg.bleName;
 
     size_t written = serializeJson(doc, file);
     file.close();

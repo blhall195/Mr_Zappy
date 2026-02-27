@@ -33,6 +33,12 @@ struct Config {
     float    laserDistanceOffset   = Defaults::laserDistanceOffset;
     uint32_t autoShutdownTimeout   = Defaults::autoShutdownTimeout;
     uint32_t laserTimeout          = Defaults::laserTimeout;
+    char     bleName[Defaults::bleNameMaxLen + 1] = {}; // initialized in constructor
+
+    Config() {
+        strncpy(bleName, Defaults::bleName, Defaults::bleNameMaxLen);
+        bleName[Defaults::bleNameMaxLen] = '\0';
+    }
 };
 
 // ── Central device state ────────────────────────────────────────────
