@@ -13,6 +13,7 @@ enum class MenuExitAction : uint8_t {
     ENTER_LONG_CALIB,   // enter long calibration mode
     ENTER_SHORT_CALIB,  // enter short calibration mode
     ENTER_SNAKE,        // launch snake game
+    ENTER_BOOTLOADER,   // reboot into UF2 bootloader for firmware update
 };
 
 class MenuManager {
@@ -41,6 +42,7 @@ private:
     FruityMenu _deleteSub;
     FruityMenu _laserSub;
     FruityMenu _shutdownSub;
+    FruityMenu _bootloaderSub;
 
     // Dynamic label buffers (updated in buildMenu)
     char _anomalyLabel[24];
@@ -68,5 +70,6 @@ private:
     static void setLaserTimeout(int value);
     static void setAutoShutdown(int value);
     static void enterSnakeGame(int);
+    static void enterBootloader(int);
     static void exitMenu(int);
 };

@@ -132,7 +132,7 @@ static bool lastBleConnected = false;
 // ── Forward declarations — init ────────────────────────────────────
 static void initPins();
 static void scanI2C();
-static void initSensors();
+// initSensors() inlined into setup()
 static void initDisplay();
 static void initLaser();
 static void initBle();
@@ -165,9 +165,20 @@ static void onFlushReading(float az, float inc, float dist);
 // ── Setup ─────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════
 void setup() {
+    // Kill NeoPixel immediately to prevent green flash on boot
+    pinMode(PIN_NEOPIXEL_POWER, OUTPUT);
+    digitalWrite(PIN_NEOPIXEL_POWER, LOW);
+
+    // Get display up ASAP — before serial, which can block on USB enumeration
+    Wire.begin();
+    Wire.setClock(400000);
+    initDisplay();
+    display.showSplash(0.0f);
+
     Serial.begin(115200);
-    while (!Serial && millis() < 3000) { }
-    delay(200);
+    if (digitalRead(PIN_BTN_MEASURE) == LOW) {   // hold MEASURE for serial debug
+        while (!Serial && millis() < 3000) { }
+    }
 
     Serial.println(F("=== Mr_Zappy Main Board C++ ==="));
     Serial.println(F("Session 12 — Full Integration"));
@@ -176,20 +187,64 @@ void setup() {
     initPins();
     buttons.begin();
 
-    Wire.begin();
-    Wire.setClock(400000);
-
     Serial.println(F("I2C bus scan:"));
     scanI2C();
+    display.showSplash(0.05f);
     Serial.println();
 
-    initSensors();
-    initDisplay();
+    // ── Sensors (broken into sub-steps for smooth progress) ──
+    magOk = mag.begin(Wire, RM3100_I2C_ADDR, RM3100_CYCLE_COUNT, PIN_MAG_DRDY);
+    Serial.print(F("RM3100:      "));
+    Serial.println(magOk ? F("OK") : F("FAILED"));
+    display.showSplash(0.12f);
+
+    imuOk = imu.begin_I2C(ISM330DHCX_ADDR, &Wire);
+    if (imuOk) {
+        imu.setAccelDataRate(LSM6DS_RATE_104_HZ);
+        imu.setGyroDataRate(LSM6DS_RATE_104_HZ);
+        imu.setAccelRange(LSM6DS_ACCEL_RANGE_4_G);
+        imu.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
+    }
+    Serial.print(F("ISM330DHCX:  "));
+    Serial.println(imuOk ? F("OK") : F("FAILED"));
+    display.showSplash(0.20f);
+
+    batOk = battery.begin(&Wire);
+    if (batOk) {
+        delay(250);  // let SOC register update after wake
+        lastBatPct = battery.cellPercent();
+        lastBatRead = millis();
+    }
+    Serial.print(F("MAX17048:    "));
+    Serial.println(batOk ? F("OK") : F("FAILED"));
+    if (batOk) {
+        Serial.print(F("  Voltage:   ")); Serial.print(battery.cellVoltage(), 3); Serial.println(F(" V"));
+        Serial.print(F("  SOC:       ")); Serial.print(lastBatPct, 1); Serial.println(F(" %"));
+        Serial.print(F("  Hibernate: ")); Serial.println(battery.isHibernating() ? F("yes") : F("no"));
+    }
+    Serial.println();
+    display.showSplash(0.35f);
+
     initLaser();
+    display.showSplash(0.42f);
+
     initBle();
+    display.showSplash(0.48f);
+
     initFlash();
+    display.showSplash(0.60f);
+
     initCalibration();
+    display.showSplash(0.90f);
+
     initDisco();
+    display.showSplash(1.0f);
+
+    // ── Switch display from splash to main screen ────────────────
+    if (dispOk) {
+        display.updateBattery(lastBatPct);
+        display.initScreen();
+    }
 
     // ── Startup: turn laser on with beep ───────────────────────────
     if (laserOk) {
@@ -333,6 +388,34 @@ void loop() {
         }
         delay(Timing::LOOP_INTERVAL_MS);
         return;
+    }
+    if (menuMgr.exitAction() == MenuExitAction::ENTER_BOOTLOADER) {
+        menuMgr.clearExitAction();
+        Serial.println(F("Entering UF2 bootloader..."));
+        if (dispOk) {
+            auto& d = display.getDisplay();
+            d.clearDisplay();
+            d.setTextSize(1);
+            d.setTextColor(SH110X_WHITE);
+            d.setCursor(0, 10);
+            d.println(F("Entered bootloader"));
+            d.println();
+            d.println(F("Plug device into PC"));
+            d.println(F("and flash new"));
+            d.println(F("firmware (.uf2)"));
+            d.println();
+            d.println(F("Load new firmware or"));
+            d.println(F("hold power button"));
+            d.println(F("to exit."));
+            d.display();
+            delay(3000);
+        }
+        // Write UF2 bootloader magic to end of RAM and reset
+        // SAME51J19A: 192KB RAM at 0x20000000, so end-4 = 0x2002FFFC
+        #define BOOT_DOUBLE_TAP_ADDRESS  (0x2002FFFCul)
+        *((volatile uint32_t *)BOOT_DOUBLE_TAP_ADDRESS) = 0xf01669efUL;
+        NVIC_SystemReset();
+        // Does not return
     }
     if (menuMgr.exitAction() == MenuExitAction::RETURN_NORMAL) {
         menuMgr.clearExitAction();
@@ -794,10 +877,10 @@ static void pollMeasurement(uint32_t now) {
         if (laserOk) laser.setLaser(false);
         ctx.laserEnabled = false;
     } else {
-        // Normal shot — blink laser off 500ms then back on, ready for next shot
+        // Normal shot — blink laser off 300ms then back on, ready for next shot
         if (laserOk) laser.setLaser(false);
         ctx.laserEnabled = false;
-        delay(500);
+        delay(300);
         if (laserOk) laser.setLaser(true);
         ctx.laserEnabled = true;
         disco.turnOff();
@@ -1248,49 +1331,14 @@ static void scanI2C() {
     Serial.println(F(" device(s)."));
 }
 
-static void initSensors() {
-    magOk = mag.begin(Wire, RM3100_I2C_ADDR, RM3100_CYCLE_COUNT, PIN_MAG_DRDY);
-    Serial.print(F("RM3100:      "));
-    Serial.println(magOk ? F("OK") : F("FAILED"));
-
-    imuOk = imu.begin_I2C(ISM330DHCX_ADDR, &Wire);
-    if (imuOk) {
-        imu.setAccelDataRate(LSM6DS_RATE_104_HZ);
-        imu.setGyroDataRate(LSM6DS_RATE_104_HZ);
-        imu.setAccelRange(LSM6DS_ACCEL_RANGE_4_G);
-        imu.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
-    }
-    Serial.print(F("ISM330DHCX:  "));
-    Serial.println(imuOk ? F("OK") : F("FAILED"));
-
-    batOk = battery.begin(&Wire);
-    if (batOk) {
-        delay(250);  // let SOC register update after wake
-        lastBatPct = battery.cellPercent();
-        lastBatRead = millis();
-    }
-    Serial.print(F("MAX17048:    "));
-    Serial.println(batOk ? F("OK") : F("FAILED"));
-    if (batOk) {
-        Serial.print(F("  Voltage:   ")); Serial.print(battery.cellVoltage(), 3); Serial.println(F(" V"));
-        Serial.print(F("  SOC:       ")); Serial.print(lastBatPct, 1); Serial.println(F(" %"));
-        Serial.print(F("  Hibernate: ")); Serial.println(battery.isHibernating() ? F("yes") : F("no"));
-    }
-
-    Serial.println();
-}
+// initSensors() inlined into setup() for splash progress updates
 
 static void initDisplay() {
     dispOk = display.begin();
     Serial.print(F("SH1107:      "));
     Serial.println(dispOk ? F("OK") : F("FAILED"));
 
-    if (dispOk) {
-        display.showInitialisingMessage();
-        delay(500);
-        display.updateBattery(lastBatPct);
-        display.initScreen();
-    }
+    // Splash is shown from setup() after initDisplay() returns
 
     Serial.println();
 }
@@ -1398,6 +1446,7 @@ static void initCalibration() {
 }
 
 static void initDisco() {
+    digitalWrite(PIN_NEOPIXEL_POWER, HIGH);
     disco.begin();
     Serial.println(F("NeoPixel:    OK"));
     Serial.println();

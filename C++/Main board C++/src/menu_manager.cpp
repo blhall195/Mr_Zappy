@@ -89,6 +89,7 @@ void MenuManager::buildMenu() {
     _deleteSub.init(*_display, "Delete saved shots");
     _laserSub.init(*_display, _laserLabel);
     _shutdownSub.init(*_display, _shutdownLabel);
+    _bootloaderSub.init(*_display, "Update Firmware");
 
     // ── Root menu items ──────────────────────────────────────────
     _root.addSubmenu("Enter Calibration", &_calSub);
@@ -96,7 +97,8 @@ void MenuManager::buildMenu() {
     _root.addSubmenu("Delete saved shots", &_deleteSub);
     _root.addSubmenu(_laserLabel, &_laserSub);
     _root.addSubmenu(_shutdownLabel, &_shutdownSub);
-    _root.addAction("Snake Game", enterSnakeGame);
+    _root.addSubmenu("Update Firmware", &_bootloaderSub);
+    _root.addAction("Play Snake", enterSnakeGame);
     _root.addAction("Exit", exitMenu);
 
     // ── Enter Calibration submenu ────────────────────────────────
@@ -131,6 +133,11 @@ void MenuManager::buildMenu() {
     _shutdownSub.addAction("60 min", setAutoShutdown, 3600);
     _shutdownSub.addAction("2 hr",   setAutoShutdown, 7200);
     _shutdownSub.addAction("<- Back", goToRoot);
+
+    // ── Update Firmware submenu ────────────────────────────────
+    _bootloaderSub.addAction("No", goToRoot);
+    _bootloaderSub.addAction("Yes", enterBootloader);
+    _bootloaderSub.addAction("<- Back", goToRoot);
 }
 
 // ── Static callbacks ─────────────────────────────────────────────────
@@ -195,6 +202,13 @@ void MenuManager::setAutoShutdown(int value) {
     Serial.print(F("Menu: auto shutdown = "));
     Serial.println(value);
     s_instance->buildMenu();
+}
+
+void MenuManager::enterBootloader(int) {
+    if (!s_instance) return;
+    Serial.println(F("Menu: entering bootloader for firmware update"));
+    s_instance->_active = false;
+    s_instance->_exitAction = MenuExitAction::ENTER_BOOTLOADER;
 }
 
 void MenuManager::enterSnakeGame(int) {
