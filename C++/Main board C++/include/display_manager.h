@@ -45,6 +45,9 @@ public:
     /// Show "Device Initialising" message
     void showInitialisingMessage();
 
+    /// Show animated boot splash with disco ball and progress bar (0.0–1.0)
+    void showSplash(float progress);
+
     /// Push buffer to OLED (call after updates)
     void refresh();
 
