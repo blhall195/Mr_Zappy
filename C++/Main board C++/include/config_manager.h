@@ -48,6 +48,16 @@ public:
     // Save calibration binary to /calibration.bin.
     bool saveCalibrationBinary(const MagCal::CalibrationBinary& data);
 
+    // ── Calibration quality metrics ───────────────────────────────────
+
+    struct CalMetrics { float mag; float grav; float accuracy; };
+
+    // Save calibration quality metrics to /cal_metrics.bin.
+    bool saveCalMetrics(const CalMetrics& m);
+
+    // Load calibration quality metrics from /cal_metrics.bin.
+    bool loadCalMetrics(CalMetrics& m);
+
     // ── Pending readings (offline queue) ────────────────────────────
 
     // Buffer a reading in RAM (fast, no flash I/O).

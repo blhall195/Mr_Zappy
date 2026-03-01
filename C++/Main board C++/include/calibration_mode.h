@@ -8,6 +8,7 @@
 #include <Adafruit_ISM330DHCX.h>
 #include <vector>
 #include "config.h"
+#include "device_context.h"
 #include "button_manager.h"
 #include "display_manager.h"
 #include "disco_manager.h"
@@ -28,6 +29,13 @@ enum class CalibState : uint8_t {
     CALCULATING_SHORT,      // running ellipsoid + alignment on same 24 pts (short cal)
     SHOW_RESULTS,           // displaying accuracy, waiting for save/discard
     SAVING,                 // writing calibration to flash
+    FB_INTRO,               // F/B check: showing instructions
+    FB_WAIT_FORESIGHT,      // F/B check: waiting for user to take foresight shot
+    FB_WAIT_BACKSIGHT,      // F/B check: waiting for user to take backsight shot
+    FB_PAIR_RESULT,         // F/B check: showing pair error, waiting for button press
+    FB_CALCULATING,         // F/B check: running sinusoidal fit
+    FB_RESULTS,             // F/B check: showing residual amplitude, save/discard
+    FB_SAVING,              // F/B check: saving corrected calibration
     DONE                    // finished, caller should exit calibration mode
 };
 
@@ -38,7 +46,15 @@ public:
     void begin(ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
                LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
                ConfigManager& cfgMgr, MagCal::Calibration& cal,
-               bool shortCal = false);
+               const Config& config, bool shortCal = false);
+
+    /// Enter foresight/backsight field check mode.
+    /// Requires an existing calibration. Collects F/B pairs to correct residual
+    /// hard-iron offset from the calibration environment.
+    void beginFBCheck(ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
+                      LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
+                      ConfigManager& cfgMgr, MagCal::Calibration& cal,
+                      const Config& config);
 
     /// Call every loop iteration. Returns true when calibration is complete.
     bool update();
@@ -64,10 +80,13 @@ private:
     std::vector<Eigen::Vector3f> magArray_;
     std::vector<Eigen::Vector3f> gravArray_;
 
-    // Rolling 8-sample consistency buffer
-    static constexpr int BUFFER_SIZE = 8;
-    Eigen::Vector3f magBuffer_[BUFFER_SIZE];
-    Eigen::Vector3f gravBuffer_[BUFFER_SIZE];
+    // Rolling consistency buffer (runtime-sized, max 8)
+    static constexpr int MAX_BUFFER_SIZE = 8;
+    Eigen::Vector3f magBuffer_[MAX_BUFFER_SIZE];
+    Eigen::Vector3f gravBuffer_[MAX_BUFFER_SIZE];
+    int bufferLen_ = Defaults::calBufferLength;  // runtime length from config
+    float magThreshold_  = Defaults::calMagConsistency;
+    float gravThreshold_ = Defaults::calGravConsistency;
     int bufferCount_ = 0;
     int bufferIdx_   = 0;   // circular write index
 
@@ -97,6 +116,40 @@ private:
     uint32_t beepEndTime_ = 0;
     bool beepActive_ = false;
 
+    // ── F/B check data ──
+    static constexpr int FB_MAX_PAIRS = 10;
+    float fbFwd_[FB_MAX_PAIRS];         // foresight bearings (degrees)
+    float fbBwd_[FB_MAX_PAIRS];         // backsight bearings (degrees)
+    float fbFwdSpread_[FB_MAX_PAIRS];   // max-min spread of 3 foresight legs (degrees)
+    float fbBwdSpread_[FB_MAX_PAIRS];   // max-min spread of 3 backsight legs (degrees)
+    int   fbCount_ = 0;                 // number of completed pairs
+    bool  fbHasForesight_ = false;      // true if foresight recorded for current pair
+    float fbCurrentFwd_ = 0.0f;         // current foresight bearing
+    float fbCurrentFwdSpread_ = 0.0f;   // spread of current foresight legs
+    float fbAmplitude_ = 0.0f;          // result: correction amplitude (degrees)
+
+    // Bearing stability buffer (replicates SensorManager pattern)
+    static constexpr int FB_STAB_LEN = 3;
+    float fbStabBuf_[FB_STAB_LEN];
+    int fbStabHead_ = 0;
+    int fbStabCount_ = 0;
+
+    // Leg consistency buffer (3 shots must agree to accept a bearing)
+    static constexpr int FB_LEG_LEN = 3;
+    float fbLegBuf_[FB_LEG_LEN];
+    int fbLegCount_ = 0;
+
+    bool fbTakingShot_ = false;         // true = red LED, waiting for stability
+    bool fbLaserOn_ = true;             // tracks laser state during FB collection
+
+    // Config values for FB stability/leg checks
+    float fbStabilityTol_ = 0.4f;
+    float fbLegAngleTol_ = 1.7f;
+
+    // Display refresh timing
+    uint32_t fbLastDisplayTime_ = 0;
+    float fbCurrentBearing_ = 0.0f;     // latest computed bearing for live display
+
     // ── State handlers ──
     void updateIntro();
     void updateCollecting();
@@ -105,6 +158,12 @@ private:
     void updateCalculatingShort();
     void updateShowResults();
     void updateSaving();
+    void updateFBIntro();
+    void updateFBWaitShot();
+    void updateFBPairResult();
+    void updateFBCalculating();
+    void updateFBResults();
+    void updateFBSaving();
 
     // ── Helpers ──
     void readSensors(Eigen::Vector3f& mag, Eigen::Vector3f& grav);
@@ -112,6 +171,10 @@ private:
     Eigen::Vector3f average(const Eigen::Vector3f* buffer, int count) const;
     void recordPoint(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav);
     void updateCoverageBar(const Eigen::Vector3f& grav);
+    float getBearing(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav);
+    bool fbBearingStable(float tolerance) const;
+    float fbCircularAverage(const float* buf, int count) const;
+    static float circularDiff(float a, float b);
 
     // ── Display helpers ──
     void showEllipsoidIntro();
@@ -121,6 +184,10 @@ private:
     void showCoverageBar();
     void showResultsScreen();
     void showSavingScreen();
+    void showFBIntroScreen();
+    void showFBLiveScreen();
+    void showFBPairResult(float error, float bearing);
+    void showFBResultsScreen();
 
     // ── Beep control ──
     void beep();

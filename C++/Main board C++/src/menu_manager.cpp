@@ -23,6 +23,20 @@ void MenuManager::begin(Adafruit_SH1107& display, DeviceContext& ctx,
 void MenuManager::update(ButtonManager& buttons) {
     if (!_active) return;
 
+    // ── Viewing cal metrics overlay: any button returns to menu ──
+    if (_viewingCalMetrics) {
+        if (buttons.wasPressed(Button::MEASURE) ||
+            buttons.wasPressed(Button::DISCO)   ||
+            buttons.wasPressed(Button::CALIB)   ||
+            buttons.wasPressed(Button::FIRE)    ||
+            buttons.wasPressed(Button::SHUTDOWN)) {
+            _viewingCalMetrics = false;
+            _lastActivity = millis();
+            _root.show();
+        }
+        return;
+    }
+
     bool interacted = false;
 
     // Scroll up
@@ -52,7 +66,7 @@ void MenuManager::update(ButtonManager& buttons) {
 
     if (interacted) {
         _lastActivity = millis();
-        _root.show();
+        if (!_viewingCalMetrics) _root.show();
     }
 
     // Auto shutdown
@@ -92,6 +106,7 @@ void MenuManager::buildMenu() {
     _bootloaderSub.init(*_display, "Update / Settings");
 
     // ── Root menu items ────────────────────────────────
+    _root.addAction("Exit", exitMenu);
     _root.addSubmenu("Enter Calibration", &_calSub);
     _root.addSubmenu(_anomalyLabel, &_anomalySub);
     _root.addSubmenu("Delete saved shots", &_deleteSub);
@@ -99,11 +114,12 @@ void MenuManager::buildMenu() {
     _root.addSubmenu(_shutdownLabel, &_shutdownSub);
     _root.addSubmenu("Update / Settings", &_bootloaderSub);
     _root.addAction("Play Snake", enterSnakeGame);
-    _root.addAction("Exit", exitMenu);
 
     // ── Enter Calibration submenu ────────────────────────────────
     _calSub.addAction("Long Calibration", enterLongCalibration);
     _calSub.addAction("Short Calibration", enterShortCalibration);
+    _calSub.addAction("Mag Field Check", enterFBCheck);
+    _calSub.addAction("View Last Cal", viewLastCal);
     _calSub.addAction("<- Back", goToRoot);
 
     // ── Anomaly Detection submenu ────────────────────────────────
@@ -216,6 +232,56 @@ void MenuManager::enterUsbDrive(int) {
     Serial.println(F("Menu: entering USB drive mode for settings"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_USB_DRIVE;
+}
+
+void MenuManager::enterFBCheck(int) {
+    if (!s_instance) return;
+    Serial.println(F("Menu: entering F/B field check"));
+    s_instance->_active = false;
+    s_instance->_exitAction = MenuExitAction::ENTER_FB_CHECK;
+}
+
+void MenuManager::viewLastCal(int) {
+    if (!s_instance) return;
+
+    ConfigManager::CalMetrics m;
+    auto& d = *s_instance->_display;
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+
+    if (s_instance->_cfgMgr->loadCalMetrics(m)) {
+        d.setTextSize(2);
+        d.setCursor(0, 0);
+        d.println(F("Last Cal"));
+
+        char buf[24];
+        d.setTextSize(1);
+        d.setCursor(0, 28);
+        snprintf(buf, sizeof(buf), "Mag:  %.5f", (double)m.mag);
+        d.println(buf);
+        d.setCursor(0, 40);
+        snprintf(buf, sizeof(buf), "Grav: %.5f", (double)m.grav);
+        d.println(buf);
+        d.setCursor(0, 52);
+        snprintf(buf, sizeof(buf), "Acc:  %.3f deg", (double)m.accuracy);
+        d.println(buf);
+
+        d.setCursor(0, 72);
+        d.println(F("Lower = Better"));
+        d.setCursor(0, 100);
+        d.println(F("Any button to return"));
+    } else {
+        d.setTextSize(2);
+        d.setCursor(10, 40);
+        d.println(F("No data"));
+        d.setTextSize(1);
+        d.setCursor(0, 100);
+        d.println(F("Any button to return"));
+    }
+
+    d.display();
+    s_instance->_viewingCalMetrics = true;
+    s_instance->_lastActivity = millis();
 }
 
 void MenuManager::enterSnakeGame(int) {

@@ -563,4 +563,124 @@ void Calibration::alignSensorRoll(
     mag_.transformRef() = (transformD * rot.transpose()).cast<float>();
 }
 
+// ── Foresight/backsight residual hard-iron correction ────────────
+
+float Calibration::applyFBCorrection(const float* fwdBearings, const float* bwdBearings,
+                                     int numPairs, float minAmplitude)
+{
+    if (numPairs < 2) return 0.0f;
+
+    // Step 1: Compute bearing errors for each F/B pair
+    // error = (fwd - bwd - 180) / 2, with wraparound handling
+    Eigen::VectorXd errors(numPairs);
+    Eigen::VectorXd bearings(numPairs);
+    for (int i = 0; i < numPairs; i++) {
+        double fwd = (double)fwdBearings[i];
+        double bwd = (double)bwdBearings[i];
+
+        // Difference with wraparound: normalize to [-180, 180]
+        double diff = fwd - bwd - 180.0;
+        while (diff > 180.0)  diff -= 360.0;
+        while (diff < -180.0) diff += 360.0;
+        errors[i] = diff / 2.0;
+
+        bearings[i] = fwd * DEG2RAD_D;
+    }
+
+    // Step 2: Least-squares fit: error = a*sin(θ) + b*cos(θ)
+    Eigen::MatrixXd A(numPairs, 2);
+    for (int i = 0; i < numPairs; i++) {
+        A(i, 0) = sin(bearings[i]);
+        A(i, 1) = cos(bearings[i]);
+    }
+    Eigen::Vector2d ab = A.colPivHouseholderQr().solve(errors);
+    double a = ab[0];
+    double b = ab[1];
+
+    // Step 3: Compute residual amplitude
+    double amplitude = sqrt(a * a + b * b);
+    float amplitudeF = (float)amplitude;
+
+    Serial.print(F("FB correction: a="));
+    Serial.print(a, 4);
+    Serial.print(F(" b="));
+    Serial.print(b, 4);
+    Serial.print(F(" amplitude="));
+    Serial.print(amplitudeF, 2);
+    Serial.println(F(" deg"));
+
+    if (amplitudeF < minAmplitude) {
+        Serial.println(F("FB correction: amplitude below threshold, skipping"));
+        return amplitudeF;
+    }
+
+    // Step 4: Convert sinusoidal params to correction in calibrated frame
+    // The bearing error from a hard-iron offset δ in the calibrated mag frame is:
+    //   error(θ) ≈ (-δ_north·sin(θ) + δ_east·cos(θ)) / H_horizontal
+    // Matching to error = a·sin(θ) + b·cos(θ):
+    //   δ_north = -a · H_horizontal
+    //   δ_east  =  b · H_horizontal
+    //
+    // In the calibrated frame, mag data is normalized to unit sphere, so H ≈ 1.
+    // The orientation matrix rows are [east, north, upward], so the correction
+    // in calibrated coordinates is along east and north directions.
+    // But since we're correcting the centre in *raw sensor* space, we need to
+    // transform back through the calibration pipeline.
+
+    // H_horizontal: in calibrated (unit-sphere) frame, total field ≈ 1.0
+    // Horizontal component = cos(dip)
+    double dipRad = (double)dipAvg_ * DEG2RAD_D;
+    double H_horiz = cos(dipRad);
+
+    if (H_horiz < 0.1) {
+        Serial.println(F("FB correction: horizontal field too weak (near magnetic pole?)"));
+        return amplitudeF;
+    }
+
+    // Correction vector in calibrated frame (east, north, up)
+    // error(θ) = (-δN·sin(θ) + δE·cos(θ)) / H_horiz
+    // so: a = -δN/H_horiz → δN = -a·H_horiz
+    //     b =  δE/H_horiz → δE =  b·H_horiz
+    double delta_north = -a * H_horiz * DEG2RAD_D;  // convert from degrees to radians
+    double delta_east  =  b * H_horiz * DEG2RAD_D;
+    double delta_up    = 0.0;
+
+    // The calibrated mag vector = transform^T * (fixAxes(raw) - centre)
+    // Adding δ to calibrated output ≡ subtracting inv(transform^T)*δ from centre
+    // Since transform may not be exactly orthogonal, use proper inverse
+    Eigen::Matrix3d transformD = mag_.transform().cast<double>();
+    Eigen::Matrix3d transformT = transformD.transpose();
+    Eigen::Matrix3d invTransformT = transformT.inverse();
+
+    Eigen::Vector3d delta_cal(delta_east, delta_north, delta_up);
+    Eigen::Vector3d delta_raw = invTransformT * delta_cal;
+
+    Serial.print(F("FB correction delta (raw): "));
+    Serial.print((float)delta_raw[0], 4);
+    Serial.print(F(", "));
+    Serial.print((float)delta_raw[1], 4);
+    Serial.print(F(", "));
+    Serial.println((float)delta_raw[2], 4);
+
+    // Step 5: Apply correction to centre
+    Eigen::Vector3f oldCentre = mag_.centreRef();
+    mag_.centreRef() += delta_raw.cast<float>();
+
+    Serial.print(F("FB centre: ["));
+    Serial.print(oldCentre[0], 4);
+    Serial.print(F(", "));
+    Serial.print(oldCentre[1], 4);
+    Serial.print(F(", "));
+    Serial.print(oldCentre[2], 4);
+    Serial.print(F("] → ["));
+    Serial.print(mag_.centreRef()[0], 4);
+    Serial.print(F(", "));
+    Serial.print(mag_.centreRef()[1], 4);
+    Serial.print(F(", "));
+    Serial.print(mag_.centreRef()[2], 4);
+    Serial.println(F("]"));
+
+    return amplitudeF;
+}
+
 } // namespace MagCal

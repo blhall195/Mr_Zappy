@@ -7,7 +7,7 @@ void CalibrationMode::begin(
     ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
     LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
     ConfigManager& cfgMgr, MagCal::Calibration& cal,
-    bool shortCal)
+    const Config& config, bool shortCal)
 {
     btns_      = &btns;
     disp_      = &disp;
@@ -17,6 +17,11 @@ void CalibrationMode::begin(
     imu_       = &imu;
     cfgMgr_    = &cfgMgr;
     cal_       = &cal;
+
+    // Apply consistency settings from config
+    bufferLen_     = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
+    magThreshold_  = config.calMagConsistency;
+    gravThreshold_ = config.calGravConsistency;
 
     // Clear data
     magArray_.clear();
@@ -77,6 +82,13 @@ bool CalibrationMode::update() {
         case CalibState::CALCULATING_SHORT:      updateCalculatingShort(); break;
         case CalibState::SHOW_RESULTS:         updateShowResults(); break;
         case CalibState::SAVING:               updateSaving(); break;
+        case CalibState::FB_INTRO:             updateFBIntro(); break;
+        case CalibState::FB_WAIT_FORESIGHT:
+        case CalibState::FB_WAIT_BACKSIGHT:    updateFBWaitShot(); break;
+        case CalibState::FB_PAIR_RESULT:       updateFBPairResult(); break;
+        case CalibState::FB_CALCULATING:       updateFBCalculating(); break;
+        case CalibState::FB_RESULTS:           updateFBResults(); break;
+        case CalibState::FB_SAVING:            updateFBSaving(); break;
         default: break;
     }
 
@@ -141,8 +153,8 @@ void CalibrationMode::updateCollecting() {
     // Push into rolling circular buffer
     magBuffer_[bufferIdx_] = magReading;
     gravBuffer_[bufferIdx_] = gravReading;
-    bufferIdx_ = (bufferIdx_ + 1) % BUFFER_SIZE;
-    if (bufferCount_ < BUFFER_SIZE) bufferCount_++;
+    bufferIdx_ = (bufferIdx_ + 1) % bufferLen_;
+    if (bufferCount_ < bufferLen_) bufferCount_++;
 
     // MEASURE button starts a capture attempt
     if (btns_->wasPressed(Button::MEASURE) && !waitingForStable_) {
@@ -150,15 +162,48 @@ void CalibrationMode::updateCollecting() {
         disco_->setRed();
     }
 
+    // CALIB button (B3) undoes the last recorded point
+    if (btns_->wasPressed(Button::CALIB) && !waitingForStable_ && iteration_ > 0) {
+        magArray_.pop_back();
+        gravArray_.pop_back();
+        iteration_--;
+
+        // Brief red flash to indicate deletion
+        disco_->setRed();
+        beep();
+        delay(150);
+        disco_->turnOff();
+
+        Serial.print(F("Undo: back to "));
+        Serial.print(iteration_);
+        Serial.print(F("/"));
+        Serial.println(targetCount_);
+
+        // Recalculate coverage bar for ellipsoid mode
+        if (state_ == CalibState::COLLECTING_ELLIPSOID) {
+            memset(coverageZones_, 0, sizeof(coverageZones_));
+            for (size_t i = 0; i < gravArray_.size(); i++) {
+                updateCoverageBar(gravArray_[i]);
+            }
+            showEllipsoidScreen();
+        } else {
+            showAlignmentProgress();
+        }
+
+        // Reset stability buffer so next capture starts fresh
+        bufferCount_ = 0;
+        bufferIdx_ = 0;
+    }
+
     // Check stability when waiting and buffer is full
-    if (waitingForStable_ && bufferCount_ >= BUFFER_SIZE) {
-        bool magConsistent = isConsistent(magBuffer_, BUFFER_SIZE, 0.3f);
-        bool gravConsistent = isConsistent(gravBuffer_, BUFFER_SIZE, 0.1f);
+    if (waitingForStable_ && bufferCount_ >= bufferLen_) {
+        bool magConsistent = isConsistent(magBuffer_, bufferLen_, magThreshold_);
+        bool gravConsistent = isConsistent(gravBuffer_, bufferLen_, gravThreshold_);
 
         if (magConsistent && gravConsistent) {
             // Record averaged point
-            Eigen::Vector3f avgMag = average(magBuffer_, BUFFER_SIZE);
-            Eigen::Vector3f avgGrav = average(gravBuffer_, BUFFER_SIZE);
+            Eigen::Vector3f avgMag = average(magBuffer_, bufferLen_);
+            Eigen::Vector3f avgGrav = average(gravBuffer_, bufferLen_);
 
             recordPoint(avgMag, avgGrav);
             disco_->setGreen();
@@ -456,10 +501,10 @@ void CalibrationMode::showEllipsoidScreen() {
     d.setCursor(0, 30);
     d.print(buf);
 
-    // Instruction
+    // Instructions
     d.setTextSize(1);
     d.setCursor(0, 68);
-    d.print(F("Button 1 to record"));
+    d.print(F("B1:record  B3:undo"));
 
     // Coverage bar
     showCoverageBar();
@@ -536,10 +581,10 @@ void CalibrationMode::showAlignmentProgress() {
     d.setCursor(0, 56);
     d.print(buf);
 
-    // Instruction
+    // Instructions
     d.setTextSize(1);
     d.setCursor(0, 100);
-    d.print(F("Button 1 to record"));
+    d.print(F("B1:record  B3:undo"));
 
     d.display();
 }
@@ -559,13 +604,13 @@ void CalibrationMode::showResultsScreen() {
     // Show both ellipsoid uniformity and alignment accuracy
     d.setTextSize(1);
     d.setCursor(0, 28);
-    snprintf(buf, sizeof(buf), "Mag:  %.4f", (double)resultMagAcc_);
+    snprintf(buf, sizeof(buf), "Mag:  %.5f", (double)resultMagAcc_);
     d.println(buf);
     d.setCursor(0, 40);
-    snprintf(buf, sizeof(buf), "Grav: %.4f", (double)resultGravAcc_);
+    snprintf(buf, sizeof(buf), "Grav: %.5f", (double)resultGravAcc_);
     d.println(buf);
     d.setCursor(0, 52);
-    snprintf(buf, sizeof(buf), "Acc:  %.2f deg", (double)resultAccuracy_);
+    snprintf(buf, sizeof(buf), "Acc:  %.3f deg", (double)resultAccuracy_);
     d.println(buf);
 
     Serial.print(F("Results — Mag: "));
@@ -706,6 +751,510 @@ void CalibrationMode::calculateAlignment() {
     Serial.println(F(" ms"));
 }
 
+// ── F/B Check: Initialization ────────────────────────────────────
+
+void CalibrationMode::beginFBCheck(
+    ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
+    LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
+    ConfigManager& cfgMgr, MagCal::Calibration& cal,
+    const Config& config)
+{
+    btns_      = &btns;
+    disp_      = &disp;
+    disco_     = &disco;
+    laser_     = &laser;
+    magSensor_ = &magSensor;
+    imu_       = &imu;
+    cfgMgr_    = &cfgMgr;
+    cal_       = &cal;
+
+    // Apply consistency settings from config
+    bufferLen_     = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
+    magThreshold_  = config.calMagConsistency;
+    gravThreshold_ = config.calGravConsistency;
+
+    // Store config values for stability/leg checks
+    fbStabilityTol_ = config.stabilityTolerance;
+    fbLegAngleTol_  = config.legAngleTolerance;
+
+    // Clear FB data
+    fbCount_ = 0;
+    fbHasForesight_ = false;
+    fbCurrentFwd_ = 0.0f;
+    fbAmplitude_ = 0.0f;
+    holdCounter_ = 0.0f;
+    bufferCount_ = 0;
+    bufferIdx_ = 0;
+    waitingForStable_ = false;
+    beepActive_ = false;
+
+    // Clear leg-style shot buffers
+    fbStabHead_ = 0;
+    fbStabCount_ = 0;
+    fbLegCount_ = 0;
+    fbTakingShot_ = false;
+    fbLaserOn_ = true;
+    fbCurrentBearing_ = 0.0f;
+    fbLastDisplayTime_ = 0;
+
+    // Turn on laser
+    laser_->setLaser(true);
+
+    Serial.println(F("F/B field check mode started"));
+    state_ = CalibState::FB_INTRO;
+    showFBIntroScreen();
+}
+
+// ── F/B Check: State handlers ───────────────────────────────────
+
+void CalibrationMode::updateFBIntro() {
+    if (btns_->wasPressed(Button::MEASURE) ||
+        btns_->wasPressed(Button::DISCO)   ||
+        btns_->wasPressed(Button::CALIB)   ||
+        btns_->wasPressed(Button::FIRE)) {
+
+        state_ = CalibState::FB_WAIT_FORESIGHT;
+        fbHasForesight_ = false;
+        fbTakingShot_ = false;
+        fbStabHead_ = 0;
+        fbStabCount_ = 0;
+        fbLegCount_ = 0;
+        showFBLiveScreen();
+        Serial.println(F("FB: waiting for foresight shot 1"));
+    }
+}
+
+void CalibrationMode::updateFBWaitShot() {
+    // Sample sensors at ~100 Hz and compute bearing
+    uint32_t now = millis();
+    if (now - lastSampleTime_ < 10) return;
+    lastSampleTime_ = now;
+
+    Eigen::Vector3f magReading, gravReading;
+    readSensors(magReading, gravReading);
+    fbCurrentBearing_ = getBearing(magReading, gravReading);
+
+    // Push bearing into stability ring buffer
+    fbStabBuf_[fbStabHead_] = fbCurrentBearing_;
+    fbStabHead_ = (fbStabHead_ + 1) % FB_STAB_LEN;
+    if (fbStabCount_ < FB_STAB_LEN) fbStabCount_++;
+
+    // Refresh display every 250ms
+    if (now - fbLastDisplayTime_ >= 250) {
+        fbLastDisplayTime_ = now;
+        showFBLiveScreen();
+    }
+
+    // MEASURE button: if laser is off, first press just turns it on;
+    // next press starts capture so user can aim before taking a shot
+    if (btns_->wasPressed(Button::MEASURE) && !fbTakingShot_) {
+        if (!fbLaserOn_) {
+            laser_->setLaser(true);
+            fbLaserOn_ = true;
+        } else {
+            fbTakingShot_ = true;
+            fbStabHead_ = 0;
+            fbStabCount_ = 0;
+            disco_->setRed();
+        }
+    }
+
+    // DISCO button: finish collection early (≥2 pairs, not mid-foresight)
+    if (btns_->wasPressed(Button::DISCO) && fbCount_ >= 2 && !fbHasForesight_) {
+        Serial.println(F("FB: finishing collection early"));
+        state_ = CalibState::FB_CALCULATING;
+        return;
+    }
+
+    // Check bearing stability when taking a shot
+    if (fbTakingShot_ && fbBearingStable(fbStabilityTol_)) {
+        // Stable reading — green beep + laser blink
+        float bearing = fbCurrentBearing_;
+        fbTakingShot_ = false;
+        disco_->setGreen();
+        beep();
+        delay(200);
+        disco_->turnOff();
+
+        // Laser blink off/on (like normal measurement)
+        laser_->setLaser(false);
+        delay(300);
+        laser_->setLaser(true);
+
+        Serial.print(F("FB shot: "));
+        Serial.print(bearing, 1);
+        Serial.print(F("  leg "));
+        Serial.print(fbLegCount_ + 1);
+        Serial.println(F("/3"));
+
+        // Push to leg consistency buffer (sliding window)
+        if (fbLegCount_ < FB_LEG_LEN) {
+            fbLegBuf_[fbLegCount_++] = bearing;
+        } else {
+            fbLegBuf_[0] = fbLegBuf_[1];
+            fbLegBuf_[1] = fbLegBuf_[2];
+            fbLegBuf_[2] = bearing;
+        }
+
+        // Check leg completion (3 consistent bearings)
+        if (fbLegCount_ >= FB_LEG_LEN) {
+            bool azOk = true;
+            for (int i = 0; i < FB_LEG_LEN && azOk; i++) {
+                for (int j = i + 1; j < FB_LEG_LEN && azOk; j++) {
+                    if (circularDiff(fbLegBuf_[i], fbLegBuf_[j]) > fbLegAngleTol_)
+                        azOk = false;
+                }
+            }
+
+            if (azOk) {
+                // LEG COMPLETE — triple buzz + purple pulse + laser fully off
+                float finalBearing = fbCircularAverage(fbLegBuf_, FB_LEG_LEN);
+
+                // Compute spread (max circular diff among the 3 legs)
+                float spread = 0.0f;
+                for (int i = 0; i < FB_LEG_LEN; i++)
+                    for (int j = i + 1; j < FB_LEG_LEN; j++)
+                        spread = max(spread, circularDiff(fbLegBuf_[i], fbLegBuf_[j]));
+
+                fbLegCount_ = 0;
+
+                // Laser fully off
+                laser_->setLaser(false);
+                fbLaserOn_ = false;
+
+                for (int i = 0; i < 3; i++) {
+                    laser_->setBuzzer(true);
+                    disco_->setWhite();
+                    delay(100);
+                    laser_->setBuzzer(false);
+                    disco_->turnOff();
+                    delay(100);
+                }
+                disco_->setPurple();
+
+                if (state_ == CalibState::FB_WAIT_FORESIGHT) {
+                    // Foresight accepted
+                    fbCurrentFwd_ = finalBearing;
+                    fbCurrentFwdSpread_ = spread;
+                    fbHasForesight_ = true;
+                    Serial.print(F("FB foresight accepted: "));
+                    Serial.println(finalBearing, 1);
+
+                    state_ = CalibState::FB_WAIT_BACKSIGHT;
+                    fbStabHead_ = 0;
+                    fbStabCount_ = 0;
+                } else {
+                    // Backsight accepted — pair complete
+                    fbFwd_[fbCount_] = fbCurrentFwd_;
+                    fbBwd_[fbCount_] = finalBearing;
+                    fbFwdSpread_[fbCount_] = fbCurrentFwdSpread_;
+                    fbBwdSpread_[fbCount_] = spread;
+                    fbCount_++;
+                    fbHasForesight_ = false;
+
+                    Serial.print(F("FB backsight accepted: "));
+                    Serial.print(finalBearing, 1);
+                    Serial.print(F("  pair "));
+                    Serial.print(fbCount_);
+                    Serial.println(F(" complete"));
+
+                    // Show pair error — wait for button press
+                    float diff = fbCurrentFwd_ - finalBearing - 180.0f;
+                    while (diff > 180.0f)  diff -= 360.0f;
+                    while (diff < -180.0f) diff += 360.0f;
+                    float pairError = diff / 2.0f;
+                    showFBPairResult(pairError, fbCurrentFwd_);
+                    state_ = CalibState::FB_PAIR_RESULT;
+                }
+            }
+        }
+    }
+}
+
+void CalibrationMode::updateFBPairResult() {
+    // Wait for any button press to continue
+    if (btns_->wasPressed(Button::MEASURE) ||
+        btns_->wasPressed(Button::DISCO)   ||
+        btns_->wasPressed(Button::CALIB)   ||
+        btns_->wasPressed(Button::FIRE)) {
+
+        disco_->turnOff();
+
+        if (fbCount_ >= FB_MAX_PAIRS) {
+            Serial.println(F("FB: max pairs reached, calculating"));
+            state_ = CalibState::FB_CALCULATING;
+        } else {
+            // Turn laser back on so user can aim, but don't start capture
+            laser_->setLaser(true);
+            fbLaserOn_ = true;
+            state_ = CalibState::FB_WAIT_FORESIGHT;
+            fbStabHead_ = 0;
+            fbStabCount_ = 0;
+        }
+    }
+}
+
+void CalibrationMode::updateFBCalculating() {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+    d.setTextSize(2);
+    d.setCursor(0, 50);
+    d.print(F("Calculating..."));
+    d.display();
+
+    fbAmplitude_ = cal_->applyFBCorrection(fbFwd_, fbBwd_, fbCount_);
+
+    state_ = CalibState::FB_RESULTS;
+    showFBResultsScreen();
+}
+
+void CalibrationMode::updateFBResults() {
+    // Hold DISCO to exit (correction is display-only for now, not applied)
+    bool b2 = btns_->isPressed(Button::DISCO);
+
+    if (b2) {
+        holdCounter_ += 0.01f;
+        if (holdCounter_ >= HOLD_TIME) {
+            Serial.println(F("FB: exiting field check."));
+            state_ = CalibState::DONE;
+        }
+    } else {
+        holdCounter_ = 0.0f;
+    }
+}
+
+void CalibrationMode::updateFBSaving() {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+    d.setTextSize(2);
+    d.setCursor(10, 50);
+    d.print(F("Saving..."));
+    d.display();
+
+    if (saveCalibration()) {
+        Serial.println(F("FB: corrected calibration saved."));
+        d.clearDisplay();
+        d.setTextColor(SH110X_WHITE);
+        d.setTextSize(2);
+        d.setCursor(20, 50);
+        d.print(F("Saved!"));
+        d.display();
+        delay(1500);
+    } else {
+        Serial.println(F("FB: save FAILED!"));
+        d.clearDisplay();
+        d.setTextColor(SH110X_WHITE);
+        d.setTextSize(2);
+        d.setCursor(10, 50);
+        d.print(F("Save FAIL"));
+        d.display();
+        delay(1500);
+    }
+    state_ = CalibState::DONE;
+}
+
+// ── F/B Check: Display helpers ──────────────────────────────────
+
+void CalibrationMode::showFBIntroScreen() {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+
+    d.setTextSize(2);
+    d.setCursor(0, 0);
+    d.println(F("Mag Field"));
+    d.println(F("Check"));
+
+    d.setTextSize(1);
+    d.setCursor(0, 44);
+    d.println(F("Shoot a target, walk"));
+    d.println(F("to it, shoot back."));
+    d.println(F("Repeat 3+ times in"));
+    d.println(F("different directions."));
+
+    d.setCursor(0, 110);
+    d.print(F("Press any button..."));
+
+    d.display();
+}
+
+void CalibrationMode::showFBLiveScreen() {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+
+    char buf[24];
+
+    // Title + state
+    d.setTextSize(2);
+    d.setCursor(0, 0);
+    if (state_ == CalibState::FB_WAIT_FORESIGHT) {
+        snprintf(buf, sizeof(buf), "Fwd #%d", fbCount_ + 1);
+    } else {
+        snprintf(buf, sizeof(buf), "Bwd #%d", fbCount_ + 1);
+    }
+    d.println(buf);
+
+    // Live bearing (large)
+    d.setTextSize(3);
+    d.setCursor(0, 28);
+    snprintf(buf, sizeof(buf), "%.1f", (double)fbCurrentBearing_);
+    d.print(buf);
+    d.setTextSize(1);
+    d.print(F(" deg"));
+
+    // Shot progress
+    d.setTextSize(1);
+    d.setCursor(0, 60);
+    snprintf(buf, sizeof(buf), "Shots: %d/3", min(fbLegCount_, 3));
+    d.println(buf);
+
+    // Foresight bearing if recorded
+    if (fbHasForesight_) {
+        d.setCursor(0, 72);
+        snprintf(buf, sizeof(buf), "Fwd: %.1f deg", (double)fbCurrentFwd_);
+        d.println(buf);
+    }
+
+    // Pairs completed
+    d.setCursor(0, 84);
+    snprintf(buf, sizeof(buf), "Pairs: %d", fbCount_);
+    d.println(buf);
+
+    // Status/hints
+    d.setCursor(0, 100);
+    if (fbTakingShot_) {
+        d.println(F("Hold steady..."));
+    } else if (fbCount_ >= 2 && !fbHasForesight_) {
+        d.println(F("B1:shoot  B2:finish"));
+    } else {
+        d.println(F("Press B1 to shoot"));
+    }
+
+    d.display();
+}
+
+void CalibrationMode::showFBPairResult(float error, float bearing) {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+
+    char buf[32];
+
+    d.setTextSize(2);
+    d.setCursor(0, 10);
+    snprintf(buf, sizeof(buf), "Pair %d", fbCount_);
+    d.println(buf);
+
+    d.setTextSize(2);
+    d.setCursor(0, 40);
+    d.println(F("Error:"));
+    d.setCursor(0, 60);
+    snprintf(buf, sizeof(buf), "%.1f deg", (double)error);
+    d.println(buf);
+
+    d.setTextSize(1);
+    d.setCursor(0, 90);
+    snprintf(buf, sizeof(buf), "@ bearing %.0f", (double)bearing);
+    d.println(buf);
+
+    d.display();
+}
+
+void CalibrationMode::showFBResultsScreen() {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+
+    d.setTextSize(2);
+    d.setCursor(0, 0);
+    d.println(F("Mag Check"));
+
+    char buf[32];
+
+    d.setTextSize(1);
+    d.setCursor(0, 28);
+    snprintf(buf, sizeof(buf), "Pairs: %d", fbCount_);
+    d.println(buf);
+
+    d.setCursor(0, 42);
+    snprintf(buf, sizeof(buf), "Correction: %.1f", (double)fbAmplitude_);
+    d.println(buf);
+
+    // Show per-pair: error and sensor spread (noise)
+    d.setCursor(0, 56);
+    for (int i = 0; i < fbCount_ && i < 5; i++) {
+        float diff = fbFwd_[i] - fbBwd_[i] - 180.0f;
+        while (diff > 180.0f)  diff -= 360.0f;
+        while (diff < -180.0f) diff += 360.0f;
+        float err = diff / 2.0f;
+        float maxSpread = max(fbFwdSpread_[i], fbBwdSpread_[i]);
+        snprintf(buf, sizeof(buf), "%d: err:%.1f sprd:%.1f",
+                 i + 1, (double)err, (double)maxSpread);
+        d.println(buf);
+    }
+
+    // Exit hint
+    int yHint = 56 + min(fbCount_, 5) * 10 + 6;
+    if (yHint > 100) yHint = 100;
+    d.setCursor(0, yHint);
+    d.println(F("Hold B2: Exit"));
+
+    d.display();
+
+    Serial.print(F("FB result: amplitude = "));
+    Serial.print(fbAmplitude_, 2);
+    Serial.print(F(" deg from "));
+    Serial.print(fbCount_);
+    Serial.println(F(" pairs"));
+}
+
+// ── F/B Check: Bearing helper ───────────────────────────────────
+
+float CalibrationMode::getBearing(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav) {
+    MagCal::Angles angles = cal_->getAngles(mag, grav);
+    return angles.azimuth;
+}
+
+float CalibrationMode::circularDiff(float a, float b) {
+    float d = a - b;
+    while (d > 180.0f)  d -= 360.0f;
+    while (d < -180.0f) d += 360.0f;
+    return fabsf(d);
+}
+
+bool CalibrationMode::fbBearingStable(float tolerance) const {
+    if (fbStabCount_ < FB_STAB_LEN) return false;
+    for (int i = 0; i < FB_STAB_LEN; i++) {
+        for (int j = i + 1; j < FB_STAB_LEN; j++) {
+            if (circularDiff(fbStabBuf_[i], fbStabBuf_[j]) > tolerance)
+                return false;
+        }
+    }
+    return true;
+}
+
+float CalibrationMode::fbCircularAverage(const float* buf, int count) const {
+    if (count <= 0) return 0.0f;
+    // Use first element as reference to handle wraparound
+    float ref = buf[0];
+    float sum = 0.0f;
+    for (int i = 0; i < count; i++) {
+        float diff = buf[i] - ref;
+        while (diff > 180.0f)  diff -= 360.0f;
+        while (diff < -180.0f) diff += 360.0f;
+        sum += diff;
+    }
+    float avg = ref + sum / count;
+    while (avg >= 360.0f) avg -= 360.0f;
+    while (avg < 0.0f)    avg += 360.0f;
+    return avg;
+}
+
+// ── Calibration save ────────────────────────────────────────────
+
 bool CalibrationMode::saveCalibration() {
     // Serialize calibration to JSON
     JsonDocument doc;
@@ -749,6 +1298,10 @@ bool CalibrationMode::saveCalibration() {
     } else {
         Serial.println(F("  Binary calibration save FAILED"));
     }
+
+    // Save quality metrics for "View Last Cal" menu
+    ConfigManager::CalMetrics metrics = {resultMagAcc_, resultGravAcc_, resultAccuracy_};
+    cfgMgr_->saveCalMetrics(metrics);
 
     return jsonOk;
 }
