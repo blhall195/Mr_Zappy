@@ -18,7 +18,9 @@
       "Bash(~/.platformio/penv/Scripts/pio run --target upload --upload-port COM32)",
       "Bash(~/.platformio/penv/Scripts/pio run --target upload)",
       "Bash(~/.platformio/penv/Scripts/pio device monitor --port COM34 --baud 115200)",
-      "Bash(~/.platformio/penv/Scripts/pio device monitor --port COM35 --baud 115200)"
+      "Bash(~/.platformio/penv/Scripts/pio device monitor --port COM35 --baud 115200)",
+      "Bash(pip install uf2conv)",
+      "Bash(pip3 install uf2conv)"
     ]
   }
 }

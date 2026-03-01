@@ -31,8 +31,12 @@ struct Config {
     float    legAngleTolerance     = Defaults::legAngleTolerance;
     float    legDistanceTolerance  = Defaults::legDistanceTolerance;
     float    laserDistanceOffset   = Defaults::laserDistanceOffset;
+    float    calMagConsistency     = Defaults::calMagConsistency;
+    float    calGravConsistency    = Defaults::calGravConsistency;
+    uint8_t  calBufferLength       = Defaults::calBufferLength;
     uint32_t autoShutdownTimeout   = Defaults::autoShutdownTimeout;
     uint32_t laserTimeout          = Defaults::laserTimeout;
+    bool     laserWibble           = Defaults::laserWibble;
     char     bleName[Defaults::bleNameMaxLen + 1] = {}; // initialized in constructor
 
     Config() {

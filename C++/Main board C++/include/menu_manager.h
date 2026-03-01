@@ -13,6 +13,7 @@ enum class MenuExitAction : uint8_t {
     ENTER_LONG_CALIB,   // enter long calibration mode
     ENTER_SHORT_CALIB,  // enter short calibration mode
     ENTER_SNAKE,        // launch snake game
+    ENTER_FB_CHECK,     // enter foresight/backsight field check
     ENTER_BOOTLOADER,   // reboot into UF2 bootloader for firmware update
     ENTER_USB_DRIVE,    // reboot into USB mass storage mode for settings
 };
@@ -55,6 +56,7 @@ private:
     DeviceContext*    _ctx     = nullptr;
     ConfigManager*    _cfgMgr  = nullptr;
     bool              _active  = false;
+    bool              _viewingCalMetrics = false;
     uint32_t          _lastActivity = 0;
     MenuExitAction    _exitAction = MenuExitAction::NONE;
 
@@ -70,6 +72,8 @@ private:
     static void deletePending(int);
     static void setLaserTimeout(int value);
     static void setAutoShutdown(int value);
+    static void enterFBCheck(int);
+    static void viewLastCal(int);
     static void enterSnakeGame(int);
     static void enterBootloader(int);
     static void enterUsbDrive(int);

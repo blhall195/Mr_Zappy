@@ -47,7 +47,7 @@ Three concurrent tasks:
 | `include/config.h` | All pin definitions, timing constants, axis mappings, defaults |
 | `include/device_context.h` | `DeviceContext`, `Config`, `Readings`, `SystemState` structs |
 | `src/sensor_manager.cpp` | EMA filtering, circular EMA for azimuth, stability ring buffer |
-| `src/calibration_mode.cpp` | On-device calibration UI (56-pt ellipsoid + 24-pt alignment) |
+| `src/calibration_mode.cpp` | On-device calibration UI (56-pt ellipsoid + 24-pt alignment + F/B field check) |
 | `src/mag_cal/calibration.cpp` | Core calibration math — orientation matrix, angle extraction |
 | `src/mag_cal/sensor.cpp` | Per-sensor: axis permutation, ellipsoid transform, RBF correction |
 | `src/rm3100.cpp` | RM3100 magnetometer I2C driver |
@@ -95,6 +95,7 @@ Ported from Python. Uses Eigen for linear algebra.
 - **Alignment**: 24 points at 3 orientations → rotates transform to gravity reference
 - **RBF non-linear correction**: Gaussian radial basis functions per magnetometer axis
 - **Anomaly detection**: field strength ±2%, dip angle ±3° triggers warnings
+- **F/B field check**: Post-calibration correction for residual hard-iron from calibration environment. User takes 3+ foresight/backsight pairs at different bearings. Sinusoidal error model `a·sin(θ) + b·cos(θ)` solved via least-squares, then back-projected to adjust `mag.centre_`. Accessible from menu → Enter Calibration → Field Check (F/B).
 
 Calibration JSON is embedded at compile-time in `main.cpp` as `CALIBRATION_JSON[]` and also persisted to QSPI flash.
 

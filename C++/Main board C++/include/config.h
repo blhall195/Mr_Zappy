@@ -62,8 +62,12 @@ namespace Defaults {
     constexpr float    legDistanceTolerance  = 0.05f;   // meters
     constexpr float    laserDistanceOffset   = 0.14f;   // meters (device length)
     constexpr float    quickShotStabilityTol = 1.0f;    // degrees (wider for quick shot)
+    constexpr float    calMagConsistency     = 0.5f;   // µT per-axis (calibration stability)
+    constexpr float    calGravConsistency    = 0.2f;   // m/s² per-axis (calibration stability)
+    constexpr uint8_t  calBufferLength       = 3;      // samples for calibration consistency
     constexpr uint32_t autoShutdownTimeout   = 1800;    // seconds (30 min)
     constexpr uint32_t laserTimeout          = 120;     // seconds (2 min)
+    constexpr bool     laserWibble            = true;    // blink laser on leg detect
     constexpr char     bleName[]             = "SAP6_Unicorn";
     constexpr uint8_t  bleNameMaxLen         = 20;      // max chars for BLE name
 }

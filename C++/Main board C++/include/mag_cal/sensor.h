@@ -82,6 +82,8 @@ public:
     const Axes& axes() const { return axes_; }
     const Eigen::Matrix3f& transform() const { return transform_; }
     Eigen::Matrix3f& transformRef() { return transform_; }
+    const Eigen::Vector3f& centre() const { return centre_; }
+    Eigen::Vector3f& centreRef() { return centre_; }
     float fieldAvg() const { return fieldAvg_; }
     float fieldStd() const { return fieldStd_; }
 

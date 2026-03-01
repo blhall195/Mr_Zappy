@@ -59,9 +59,9 @@ void ButtonManager::update() {
             b.debounced = b.raw;
         }
 
-        // Edge flags
-        b.fell = ( b.debounced && !b.previous);  // just pressed
-        b.rose = (!b.debounced &&  b.previous);   // just released
+        // Edge flags — sticky until consumed by wasPressed()/wasReleased()
+        if ( b.debounced && !b.previous) b.fell = true;   // just pressed
+        if (!b.debounced &&  b.previous) b.rose = true;   // just released
     }
 }
 
@@ -69,12 +69,18 @@ bool ButtonManager::isPressed(Button btn) const {
     return btn_[static_cast<uint8_t>(btn)].debounced;
 }
 
-bool ButtonManager::wasPressed(Button btn) const {
-    return btn_[static_cast<uint8_t>(btn)].fell;
+bool ButtonManager::wasPressed(Button btn) {
+    State& b = btn_[static_cast<uint8_t>(btn)];
+    bool v = b.fell;
+    b.fell = false;
+    return v;
 }
 
-bool ButtonManager::wasReleased(Button btn) const {
-    return btn_[static_cast<uint8_t>(btn)].rose;
+bool ButtonManager::wasReleased(Button btn) {
+    State& b = btn_[static_cast<uint8_t>(btn)];
+    bool v = b.rose;
+    b.rose = false;
+    return v;
 }
 
 const char* ButtonManager::name(Button btn) {

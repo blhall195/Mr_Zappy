@@ -121,8 +121,12 @@ bool ConfigManager::loadConfig(Config& cfg) {
     cfg.legAngleTolerance     = doc["leg_angle_tolerance"]     | Defaults::legAngleTolerance;
     cfg.legDistanceTolerance  = doc["leg_distance_tolerance"]  | Defaults::legDistanceTolerance;
     cfg.laserDistanceOffset   = doc["laser_distance_offset"]   | Defaults::laserDistanceOffset;
+    cfg.calMagConsistency     = doc["cal_mag_consistency"]     | Defaults::calMagConsistency;
+    cfg.calGravConsistency    = doc["cal_grav_consistency"]    | Defaults::calGravConsistency;
+    cfg.calBufferLength       = doc["cal_buffer_length"]       | Defaults::calBufferLength;
     cfg.autoShutdownTimeout   = doc["auto_shutdown_timeout"]   | Defaults::autoShutdownTimeout;
     cfg.laserTimeout          = doc["laser_timeout"]           | Defaults::laserTimeout;
+    cfg.laserWibble           = doc["laser_wibble"]            | Defaults::laserWibble;
 
     const char* name = doc["ble_name"] | Defaults::bleName;
     strncpy(cfg.bleName, name, Defaults::bleNameMaxLen);
@@ -151,8 +155,12 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["leg_angle_tolerance"]    = cfg.legAngleTolerance;
     doc["leg_distance_tolerance"] = cfg.legDistanceTolerance;
     doc["laser_distance_offset"]  = cfg.laserDistanceOffset;
+    doc["cal_mag_consistency"]    = cfg.calMagConsistency;
+    doc["cal_grav_consistency"]   = cfg.calGravConsistency;
+    doc["cal_buffer_length"]      = cfg.calBufferLength;
     doc["auto_shutdown_timeout"]  = cfg.autoShutdownTimeout;
     doc["laser_timeout"]          = cfg.laserTimeout;
+    doc["laser_wibble"]           = cfg.laserWibble;
     doc["ble_name"]               = cfg.bleName;
 
     size_t written = serializeJsonPretty(doc, file);
@@ -221,6 +229,27 @@ bool ConfigManager::saveCalibrationBinary(const MagCal::CalibrationBinary& data)
     size_t written = file.write(reinterpret_cast<const uint8_t*>(&data), sizeof(data));
     file.close();
     return written == sizeof(data);
+}
+
+// ── Calibration quality metrics ─────────────────────────────────────
+
+bool ConfigManager::saveCalMetrics(const CalMetrics& m) {
+    if (!mounted_) return false;
+    s_fatfs.remove("/cal_metrics.bin");
+    File32 file = s_fatfs.open("/cal_metrics.bin", FILE_WRITE);
+    if (!file) return false;
+    size_t written = file.write(reinterpret_cast<const uint8_t*>(&m), sizeof(m));
+    file.close();
+    return written == sizeof(m);
+}
+
+bool ConfigManager::loadCalMetrics(CalMetrics& m) {
+    if (!mounted_) return false;
+    File32 file = s_fatfs.open("/cal_metrics.bin", FILE_READ);
+    if (!file) return false;
+    size_t bytesRead = file.read(reinterpret_cast<uint8_t*>(&m), sizeof(m));
+    file.close();
+    return bytesRead == sizeof(m);
 }
 
 // ── Pending readings ───────────────────────────────────────────────

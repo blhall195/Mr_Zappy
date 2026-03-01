@@ -20,8 +20,8 @@ public:
     void update();
 
     bool isPressed(Button btn) const;
-    bool wasPressed(Button btn) const;
-    bool wasReleased(Button btn) const;
+    bool wasPressed(Button btn);
+    bool wasReleased(Button btn);
 
     static const char* name(Button btn);
 
