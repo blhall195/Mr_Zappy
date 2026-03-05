@@ -96,6 +96,9 @@ void MenuManager::buildMenu() {
     snprintf(_shutdownLabel, sizeof(_shutdownLabel), "Shutdown: %lu min",
              (unsigned long)(_ctx->config.autoShutdownTimeout / 60));
 
+    uint8_t bpct = (uint8_t)((uint16_t)_ctx->config.screenBrightness * 100 / 255);
+    snprintf(_brightnessLabel, sizeof(_brightnessLabel), "Brightness: %u%%", bpct);
+
     // ── Initialize all menus ─────────────────────────────────────
     _root.init(*_display, "Main Menu");
     _calSub.init(*_display, "Enter Calibration");
@@ -103,16 +106,16 @@ void MenuManager::buildMenu() {
     _deleteSub.init(*_display, "Delete saved shots");
     _laserSub.init(*_display, _laserLabel);
     _shutdownSub.init(*_display, _shutdownLabel);
-    _bootloaderSub.init(*_display, "Update / Settings");
+    _brightnessSub.init(*_display, _brightnessLabel);
+    _settingsSub.init(*_display, "Settings");
+    _firmwareSub.init(*_display, "Update Firmware");
 
     // ── Root menu items ────────────────────────────────
     _root.addAction("Exit", exitMenu);
     _root.addSubmenu("Enter Calibration", &_calSub);
-    _root.addSubmenu(_anomalyLabel, &_anomalySub);
+    _root.addSubmenu("Update Firmware", &_firmwareSub);
+    _root.addSubmenu("Settings", &_settingsSub);
     _root.addSubmenu("Delete saved shots", &_deleteSub);
-    _root.addSubmenu(_laserLabel, &_laserSub);
-    _root.addSubmenu(_shutdownLabel, &_shutdownSub);
-    _root.addSubmenu("Update / Settings", &_bootloaderSub);
     _root.addAction("Play Snake", enterSnakeGame);
 
     // ── Enter Calibration submenu ────────────────────────────────
@@ -125,7 +128,7 @@ void MenuManager::buildMenu() {
     // ── Anomaly Detection submenu ────────────────────────────────
     _anomalySub.addAction("On", setAnomalyOn);
     _anomalySub.addAction("Off", setAnomalyOff);
-    _anomalySub.addAction("<- Back", goToRoot);
+    _anomalySub.addAction("<- Back", goToSettings);
 
     // ── Delete Saved Shots submenu ───────────────────────────────
     _deleteSub.addAction("No", goToRoot);
@@ -139,7 +142,7 @@ void MenuManager::buildMenu() {
     _laserSub.addAction("5 min",  setLaserTimeout, 300);
     _laserSub.addAction("15 min", setLaserTimeout, 900);
     _laserSub.addAction("30 min", setLaserTimeout, 1800);
-    _laserSub.addAction("<- Back", goToRoot);
+    _laserSub.addAction("<- Back", goToSettings);
 
     // ── Auto Shutdown submenu ────────────────────────────────────
     _shutdownSub.addAction("5 min",  setAutoShutdown, 300);
@@ -148,12 +151,30 @@ void MenuManager::buildMenu() {
     _shutdownSub.addAction("30 min", setAutoShutdown, 1800);
     _shutdownSub.addAction("60 min", setAutoShutdown, 3600);
     _shutdownSub.addAction("2 hr",   setAutoShutdown, 7200);
-    _shutdownSub.addAction("<- Back", goToRoot);
+    _shutdownSub.addAction("<- Back", goToSettings);
 
-    // ── Update / Settings submenu (direct actions, no confirmation) ──
-    _bootloaderSub.addAction("Update Firmware", enterBootloader);
-    _bootloaderSub.addAction("Edit Settings File", enterUsbDrive);
-    _bootloaderSub.addAction("<- Back", goToRoot);
+    // ── Screen Brightness submenu ─────────────────────────────────
+    _brightnessSub.addAction("1%",   setScreenBrightness, 3);
+    _brightnessSub.addAction("5%",   setScreenBrightness, 13);
+    _brightnessSub.addAction("10%",  setScreenBrightness, 26);
+    _brightnessSub.addAction("25%",  setScreenBrightness, 64);
+    _brightnessSub.addAction("50%",  setScreenBrightness, 128);
+    _brightnessSub.addAction("75%",  setScreenBrightness, 191);
+    _brightnessSub.addAction("100%", setScreenBrightness, 255);
+    _brightnessSub.addAction("<- Back", goToSettings);
+
+    // ── Update Firmware submenu ──────────────────────────────────────
+    _firmwareSub.addAction("No", goToRoot);
+    _firmwareSub.addAction("Yes", enterBootloader);
+    _firmwareSub.addAction("<- Back", goToRoot);
+
+    // ── Settings submenu ───────────────────────────────────────────────
+    _settingsSub.addSubmenu(_laserLabel, &_laserSub);
+    _settingsSub.addSubmenu(_anomalyLabel, &_anomalySub);
+    _settingsSub.addSubmenu(_shutdownLabel, &_shutdownSub);
+    _settingsSub.addSubmenu(_brightnessLabel, &_brightnessSub);
+    _settingsSub.addAction("Edit Settings File", enterUsbDrive);
+    _settingsSub.addAction("<- Back", goToRoot);
 }
 
 // ── Static callbacks ─────────────────────────────────────────────────
@@ -161,6 +182,11 @@ void MenuManager::buildMenu() {
 void MenuManager::goToRoot(int) {
     if (!s_instance) return;
     s_instance->_root.closeSub();
+}
+
+void MenuManager::goToSettings(int) {
+    if (!s_instance) return;
+    s_instance->_settingsSub.closeSub();
 }
 
 void MenuManager::enterLongCalibration(int) {
@@ -232,6 +258,16 @@ void MenuManager::enterUsbDrive(int) {
     Serial.println(F("Menu: entering USB drive mode for settings"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_USB_DRIVE;
+}
+
+void MenuManager::setScreenBrightness(int value) {
+    if (!s_instance) return;
+    s_instance->_ctx->config.screenBrightness = (uint8_t)value;
+    s_instance->_display->setContrast((uint8_t)value);
+    s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
+    Serial.print(F("Menu: screen brightness = "));
+    Serial.println(value);
+    s_instance->buildMenu();
 }
 
 void MenuManager::enterFBCheck(int) {

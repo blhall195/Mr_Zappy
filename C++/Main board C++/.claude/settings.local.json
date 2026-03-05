@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio run -t upload)",
+      "Bash(\"/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" run -t upload)",
+      "Bash(\"/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" device list)",
+      "Bash(~/.platformio/penv/Scripts/pio run -t upload)",
+      "Bash(~/.platformio/penv/Scripts/pio device list)",
+      "Bash(pio device list)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run -t upload --upload-port COM43 -v)",
+      "Bash(python -m serial.tools.list_ports -v)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run -t upload)",
+      "Bash(~/.platformio/penv/Scripts/platformio run)",
+      "Bash(~/.platformio/penv/Scripts/platformio run --target upload)"
+    ]
+  }
+}

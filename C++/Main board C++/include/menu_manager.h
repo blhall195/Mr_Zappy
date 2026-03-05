@@ -44,12 +44,15 @@ private:
     FruityMenu _deleteSub;
     FruityMenu _laserSub;
     FruityMenu _shutdownSub;
-    FruityMenu _bootloaderSub;
+    FruityMenu _settingsSub;
+    FruityMenu _brightnessSub;
+    FruityMenu _firmwareSub;
 
     // Dynamic label buffers (updated in buildMenu)
     char _anomalyLabel[24];
     char _laserLabel[24];
     char _shutdownLabel[24];
+    char _brightnessLabel[24];
 
     // State
     Adafruit_SH1107* _display  = nullptr;
@@ -65,6 +68,7 @@ private:
 
     // Callbacks (static free functions, access state via s_instance)
     static void goToRoot(int);
+    static void goToSettings(int);
     static void enterLongCalibration(int);
     static void enterShortCalibration(int);
     static void setAnomalyOn(int);
@@ -77,5 +81,6 @@ private:
     static void enterSnakeGame(int);
     static void enterBootloader(int);
     static void enterUsbDrive(int);
+    static void setScreenBrightness(int value);
     static void exitMenu(int);
 };

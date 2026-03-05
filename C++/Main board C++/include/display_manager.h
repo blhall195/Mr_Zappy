@@ -49,6 +49,9 @@ public:
     /// nameSuffix: if non-null, shown instead of "Initialising..."
     void showSplash(bool laserOn, const char* nameSuffix = nullptr);
 
+    /// Set OLED contrast/brightness (0-255)
+    void setBrightness(uint8_t level);
+
     /// Push buffer to OLED (call after updates)
     void refresh();
 

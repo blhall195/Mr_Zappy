@@ -250,10 +250,11 @@ void setup() {
                 d.setCursor(0, 10);
                 d.println(F("USB Drive Mode"));
                 d.println();
-                d.println(F("Edit config.json"));
-                d.println(F("on the USB drive."));
+                d.println(F("Unplug & replug USB"));
+                d.println(F("to see the drive."));
                 d.println();
-                d.println(F("Eject drive, then"));
+                d.println(F("Edit config.json,"));
+                d.println(F("eject drive, then"));
                 d.println(F("hold power button"));
                 d.println(F("to restart."));
                 d.display();
@@ -1517,6 +1518,8 @@ static void initFlash() {
             configMgr.saveConfig(ctx.config);
         }
 
+        if (dispOk) display.setBrightness(ctx.config.screenBrightness);
+
         uint16_t pending = configMgr.countPendingReadings();
         if (pending > 0) {
             Serial.print(F("  Pending readings: "));
@@ -1629,10 +1632,11 @@ static void enterUsbDriveMode() {
         d.setCursor(0, 10);
         d.println(F("USB Drive Mode"));
         d.println();
-        d.println(F("Edit config.json"));
-        d.println(F("on the USB drive."));
+        d.println(F("Unplug & replug USB"));
+        d.println(F("to see the drive."));
         d.println();
-        d.println(F("Eject drive, then"));
+        d.println(F("Edit config.json,"));
+        d.println(F("eject drive, then"));
         d.println(F("hold power button"));
         d.println(F("to restart."));
         d.display();
