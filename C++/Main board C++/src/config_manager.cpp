@@ -97,11 +97,14 @@ bool ConfigManager::loadConfig(Config& cfg) {
     File32 file = s_fatfs.open("/config.json", FILE_READ);
     if (!file) return false;
 
-    char buf[512];
+    char buf[1024];
     size_t len = file.read(buf, sizeof(buf) - 1);
     file.close();
     if (len == 0) return false;
     buf[len] = '\0';
+
+    Serial.println(F("  Raw config.json:"));
+    Serial.println(buf);
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, buf, len);
@@ -116,21 +119,25 @@ bool ConfigManager::loadConfig(Config& cfg) {
     cfg.dipTolerance          = doc["dip_tolerance"]          | Defaults::dipTolerance;
     cfg.anomalyDetection      = doc["anomaly_detection"]      | Defaults::anomalyDetection;
     cfg.stabilityTolerance    = doc["stability_tolerance"]    | Defaults::stabilityTolerance;
-    cfg.stabilityBufferLength = doc["stability_buffer_length"] | Defaults::stabilityBufferLength;
+    cfg.stabilityBufferLength = doc["stability_buffer_length"] | (int)Defaults::stabilityBufferLength;
     cfg.emaAlpha              = doc["ema_alpha"]               | Defaults::emaAlpha;
     cfg.legAngleTolerance     = doc["leg_angle_tolerance"]     | Defaults::legAngleTolerance;
     cfg.legDistanceTolerance  = doc["leg_distance_tolerance"]  | Defaults::legDistanceTolerance;
     cfg.laserDistanceOffset   = doc["laser_distance_offset"]   | Defaults::laserDistanceOffset;
     cfg.calMagConsistency     = doc["cal_mag_consistency"]     | Defaults::calMagConsistency;
     cfg.calGravConsistency    = doc["cal_grav_consistency"]    | Defaults::calGravConsistency;
-    cfg.calBufferLength       = doc["cal_buffer_length"]       | Defaults::calBufferLength;
+    cfg.calBufferLength       = doc["cal_buffer_length"]       | (int)Defaults::calBufferLength;
     cfg.autoShutdownTimeout   = doc["auto_shutdown_timeout"]   | Defaults::autoShutdownTimeout;
     cfg.laserTimeout          = doc["laser_timeout"]           | Defaults::laserTimeout;
     cfg.laserWibble           = doc["laser_wibble"]            | Defaults::laserWibble;
+    cfg.screenBrightness      = doc["screen_brightness"]       | (int)Defaults::screenBrightness;
 
     const char* name = doc["ble_name"] | Defaults::bleName;
     strncpy(cfg.bleName, name, Defaults::bleNameMaxLen);
     cfg.bleName[Defaults::bleNameMaxLen] = '\0';
+
+    Serial.print(F("  Loaded ble_name: ")); Serial.println(cfg.bleName);
+    Serial.print(F("  Loaded brightness: ")); Serial.println(cfg.screenBrightness);
 
     return true;
 }
@@ -150,17 +157,18 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["dip_tolerance"]          = cfg.dipTolerance;
     doc["anomaly_detection"]      = cfg.anomalyDetection;
     doc["stability_tolerance"]    = cfg.stabilityTolerance;
-    doc["stability_buffer_length"]= cfg.stabilityBufferLength;
+    doc["stability_buffer_length"]= (int)cfg.stabilityBufferLength;
     doc["ema_alpha"]              = cfg.emaAlpha;
     doc["leg_angle_tolerance"]    = cfg.legAngleTolerance;
     doc["leg_distance_tolerance"] = cfg.legDistanceTolerance;
     doc["laser_distance_offset"]  = cfg.laserDistanceOffset;
     doc["cal_mag_consistency"]    = cfg.calMagConsistency;
     doc["cal_grav_consistency"]   = cfg.calGravConsistency;
-    doc["cal_buffer_length"]      = cfg.calBufferLength;
+    doc["cal_buffer_length"]      = (int)cfg.calBufferLength;
     doc["auto_shutdown_timeout"]  = cfg.autoShutdownTimeout;
     doc["laser_timeout"]          = cfg.laserTimeout;
     doc["laser_wibble"]           = cfg.laserWibble;
+    doc["screen_brightness"]      = (int)cfg.screenBrightness;
     doc["ble_name"]               = cfg.bleName;
 
     size_t written = serializeJsonPretty(doc, file);

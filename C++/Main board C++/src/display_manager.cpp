@@ -41,6 +41,11 @@ bool DisplayManager::begin() {
     return true;
 }
 
+void DisplayManager::setBrightness(uint8_t level) {
+    if (!_initialized) return;
+    _display.setContrast(level);
+}
+
 void DisplayManager::initScreen() {
     if (!_initialized) return;
     drawMainScreen();

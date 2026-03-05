@@ -54,13 +54,13 @@ namespace Defaults {
     constexpr float    magTolerance          = 10.0f;   // degrees
     constexpr float    gravTolerance         = 10.0f;   // degrees
     constexpr float    dipTolerance          = 10.0f;   // degrees
-    constexpr bool     anomalyDetection      = true;
+    constexpr bool     anomalyDetection      = false;
     constexpr float    stabilityTolerance    = 0.4f;    // degrees
     constexpr uint8_t  stabilityBufferLength = 3;
     constexpr float    emaAlpha              = 0.5f;
     constexpr float    legAngleTolerance     = 1.7f;    // degrees
     constexpr float    legDistanceTolerance  = 0.05f;   // meters
-    constexpr float    laserDistanceOffset   = 0.14f;   // meters (device length)
+    constexpr float    laserDistanceOffset   = 0.162f;  // meters (device length)
     constexpr float    quickShotStabilityTol = 1.0f;    // degrees (wider for quick shot)
     constexpr float    calMagConsistency     = 0.5f;   // µT per-axis (calibration stability)
     constexpr float    calGravConsistency    = 0.2f;   // m/s² per-axis (calibration stability)
@@ -68,6 +68,7 @@ namespace Defaults {
     constexpr uint32_t autoShutdownTimeout   = 1800;    // seconds (30 min)
     constexpr uint32_t laserTimeout          = 120;     // seconds (2 min)
     constexpr bool     laserWibble            = true;    // blink laser on leg detect
+    constexpr uint8_t  screenBrightness      = 255;     // OLED contrast 0-255
     constexpr char     bleName[]             = "SAP6_Unicorn";
     constexpr uint8_t  bleNameMaxLen         = 20;      // max chars for BLE name
 }
