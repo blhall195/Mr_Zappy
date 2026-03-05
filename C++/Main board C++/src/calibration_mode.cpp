@@ -776,6 +776,7 @@ void CalibrationMode::beginFBCheck(
     // Store config values for stability/leg checks
     fbStabilityTol_ = config.stabilityTolerance;
     fbLegAngleTol_  = config.legAngleTolerance;
+    fbLaserWibble_  = config.laserWibble;
 
     // Clear FB data
     fbCount_ = 0;
@@ -849,13 +850,24 @@ void CalibrationMode::updateFBWaitShot() {
     // next press starts capture so user can aim before taking a shot
     if (btns_->wasPressed(Button::MEASURE) && !fbTakingShot_) {
         if (!fbLaserOn_) {
+            // Re-enable laser with beep (same as main measurement flow)
+            laser_->setBuzzer(true);
+            delay(25);
             laser_->setLaser(true);
+            delay(200);
+            laser_->setBuzzer(false);
+            delay(25);
             fbLaserOn_ = true;
         } else {
             fbTakingShot_ = true;
             fbStabHead_ = 0;
             fbStabCount_ = 0;
             disco_->setRed();
+            // Entry click buzzer (same as main measurement flow)
+            laser_->setBuzzer(true);
+            delay(100);
+            laser_->setBuzzer(false);
+            delay(25);
         }
     }
 
@@ -868,18 +880,20 @@ void CalibrationMode::updateFBWaitShot() {
 
     // Check bearing stability when taking a shot
     if (fbTakingShot_ && fbBearingStable(fbStabilityTol_)) {
-        // Stable reading — green beep + laser blink
+        // Stable reading — green LED + success beep (same as main measurement)
         float bearing = fbCurrentBearing_;
         fbTakingShot_ = false;
         disco_->setGreen();
-        beep();
-        delay(200);
-        disco_->turnOff();
+        delay(25);
+        laser_->setBuzzer(true);
+        delay(100);
+        laser_->setBuzzer(false);
+        delay(25);
 
-        // Laser blink off/on (like normal measurement)
+        // Laser off after shot (same as main measurement)
         laser_->setLaser(false);
-        delay(300);
-        laser_->setLaser(true);
+        fbLaserOn_ = false;
+        disco_->turnOff();
 
         Serial.print(F("FB shot: "));
         Serial.print(bearing, 1);
@@ -907,7 +921,8 @@ void CalibrationMode::updateFBWaitShot() {
             }
 
             if (azOk) {
-                // LEG COMPLETE — triple buzz + purple pulse + laser fully off
+                // LEG COMPLETE — triple buzz + white flash + wibble + purple
+                // (same sequence as main measurement flow)
                 float finalBearing = fbCircularAverage(fbLegBuf_, FB_LEG_LEN);
 
                 // Compute spread (max circular diff among the 3 legs)
@@ -918,10 +933,7 @@ void CalibrationMode::updateFBWaitShot() {
 
                 fbLegCount_ = 0;
 
-                // Laser fully off
-                laser_->setLaser(false);
-                fbLaserOn_ = false;
-
+                // Triple buzz + white flash
                 for (int i = 0; i < 3; i++) {
                     laser_->setBuzzer(true);
                     disco_->setWhite();
@@ -930,6 +942,21 @@ void CalibrationMode::updateFBWaitShot() {
                     disco_->turnOff();
                     delay(100);
                 }
+
+                // Laser wibble to indicate leg detected
+                if (fbLaserWibble_) {
+                    for (int i = 0; i < 4; i++) {
+                        laser_->setLaser(true);
+                        delay(150);
+                        laser_->setLaser(false);
+                        delay(200);
+                    }
+                }
+
+                // Laser fully off after leg
+                laser_->setLaser(false);
+                fbLaserOn_ = false;
+
                 disco_->setPurple();
 
                 if (state_ == CalibState::FB_WAIT_FORESIGHT) {

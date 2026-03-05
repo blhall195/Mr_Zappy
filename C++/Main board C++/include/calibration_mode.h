@@ -145,6 +145,7 @@ private:
     // Config values for FB stability/leg checks
     float fbStabilityTol_ = 0.4f;
     float fbLegAngleTol_ = 1.7f;
+    bool  fbLaserWibble_ = false;
 
     // Display refresh timing
     uint32_t fbLastDisplayTime_ = 0;
