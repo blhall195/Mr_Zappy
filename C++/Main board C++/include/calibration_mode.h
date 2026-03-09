@@ -164,9 +164,14 @@ private:
     float fbLegAngleTol_ = 1.7f;
     bool  fbLaserWibble_ = false;
 
+    // EMA smoothing on bearing (matches SensorManager pipeline)
+    float fbEmaAz_ = 0.0f;
+    float fbEmaAlpha_ = 0.5f;           // from config.emaAlpha
+    bool  fbEmaSeeded_ = false;
+
     // Display refresh timing
     uint32_t fbLastDisplayTime_ = 0;
-    float fbCurrentBearing_ = 0.0f;     // latest computed bearing for live display
+    float fbCurrentBearing_ = 0.0f;     // latest EMA-smoothed bearing for live display
 
     // ── State handlers ──
     void updateIntro();

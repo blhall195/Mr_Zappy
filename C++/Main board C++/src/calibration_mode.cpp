@@ -880,6 +880,9 @@ void CalibrationMode::beginFBCheck(
     fbLaserOn_ = true;
     fbCurrentBearing_ = 0.0f;
     fbLastDisplayTime_ = 0;
+    fbEmaAz_ = 0.0f;
+    fbEmaAlpha_ = config.emaAlpha;
+    fbEmaSeeded_ = false;
 
     // Turn on laser
     laser_->setLaser(true);
@@ -916,9 +919,23 @@ void CalibrationMode::updateFBWaitShot() {
 
     Eigen::Vector3f magReading, gravReading;
     readSensors(magReading, gravReading);
-    fbCurrentBearing_ = getBearing(magReading, gravReading);
+    float rawBearing = getBearing(magReading, gravReading);
 
-    // Push bearing into stability ring buffer
+    // Circular EMA smoothing (matches SensorManager pipeline)
+    if (!fbEmaSeeded_) {
+        fbEmaAz_ = rawBearing;
+        fbEmaSeeded_ = true;
+    } else {
+        float diff = rawBearing - fbEmaAz_;
+        if (diff > 180.0f)  diff -= 360.0f;
+        if (diff < -180.0f) diff += 360.0f;
+        fbEmaAz_ = fbEmaAz_ + fbEmaAlpha_ * diff;
+        if (fbEmaAz_ < 0.0f)   fbEmaAz_ += 360.0f;
+        if (fbEmaAz_ >= 360.0f) fbEmaAz_ -= 360.0f;
+    }
+    fbCurrentBearing_ = fbEmaAz_;
+
+    // Push EMA-smoothed bearing into stability ring buffer
     fbStabBuf_[fbStabHead_] = fbCurrentBearing_;
     fbStabHead_ = (fbStabHead_ + 1) % FB_STAB_LEN;
     if (fbStabCount_ < FB_STAB_LEN) fbStabCount_++;
