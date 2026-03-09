@@ -80,8 +80,8 @@ private:
     std::vector<Eigen::Vector3f> magArray_;
     std::vector<Eigen::Vector3f> gravArray_;
 
-    // Rolling consistency buffer (runtime-sized, max 8)
-    static constexpr int MAX_BUFFER_SIZE = 8;
+    // Rolling consistency buffer (runtime-sized, max 16)
+    static constexpr int MAX_BUFFER_SIZE = 16;
     Eigen::Vector3f magBuffer_[MAX_BUFFER_SIZE];
     Eigen::Vector3f gravBuffer_[MAX_BUFFER_SIZE];
     int bufferLen_ = Defaults::calBufferLength;  // runtime length from config
@@ -91,6 +91,21 @@ private:
     int bufferIdx_   = 0;   // circular write index
 
     bool waitingForStable_ = false;
+    uint32_t captureStart_ = 0;     // millis() when MEASURE pressed (for timeout)
+    uint16_t calTimeoutMs_ = Defaults::calTimeoutMs;
+
+    // Rolling EMA pre-filter to smooth noise before consistency check
+    float calEmaAlpha_ = Defaults::calEmaAlpha;  // lower = smoother (0.3 = ~3 sample lag)
+    Eigen::Vector3f emaMag_  = Eigen::Vector3f::Zero();
+    Eigen::Vector3f emaGrav_ = Eigen::Vector3f::Zero();
+    bool emaInitialized_ = false;
+
+    // Settle time: device must stay consistent for this duration before accepting
+    uint16_t settleMs_ = Defaults::calSettleMs;
+    uint32_t settleStart_ = 0;          // millis() when consistency first detected (0 = not settling)
+    Eigen::Vector3f accumMag_ = Eigen::Vector3f::Zero();
+    Eigen::Vector3f accumGrav_ = Eigen::Vector3f::Zero();
+    int accumCount_ = 0;
     int iteration_ = 0;
     int targetCount_ = 56;  // 56 for ellipsoid, 24 for alignment
 
@@ -168,6 +183,7 @@ private:
 
     // ── Helpers ──
     void readSensors(Eigen::Vector3f& mag, Eigen::Vector3f& grav);
+    void acceptPoint(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav);
     bool isConsistent(const Eigen::Vector3f* buffer, int count, float threshold) const;
     Eigen::Vector3f average(const Eigen::Vector3f* buffer, int count) const;
     void recordPoint(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav);

@@ -62,9 +62,12 @@ namespace Defaults {
     constexpr float    legDistanceTolerance  = 0.05f;   // meters
     constexpr float    laserDistanceOffset   = 0.162f;  // meters (device length)
     constexpr float    quickShotStabilityTol = 1.0f;    // degrees (wider for quick shot)
-    constexpr float    calMagConsistency     = 0.5f;   // µT per-axis (calibration stability)
-    constexpr float    calGravConsistency    = 0.2f;   // m/s² per-axis (calibration stability)
-    constexpr uint8_t  calBufferLength       = 3;      // samples for calibration consistency
+    constexpr float    calMagConsistency     = 0.5f;   // degrees (angular consistency window for mag)
+    constexpr float    calGravConsistency    = 0.4f;   // degrees (angular consistency window for gravity)
+    constexpr uint8_t  calBufferLength       = 5;      // samples for calibration consistency window
+    constexpr uint16_t calSettleMs           = 250;    // ms device must stay stable before accepting
+    constexpr float    calEmaAlpha           = 0.3f;   // EMA pre-filter (lower = smoother, 0.3 = ~3 sample lag)
+    constexpr uint16_t calTimeoutMs          = 3000;   // ms max wait for stability before forcing acceptance
     constexpr uint32_t autoShutdownTimeout   = 1800;    // seconds (30 min)
     constexpr uint32_t laserTimeout          = 120;     // seconds (2 min)
     constexpr bool     laserWibble            = true;    // blink laser on leg detect

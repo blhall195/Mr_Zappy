@@ -13,6 +13,7 @@ void MenuManager::begin(Adafruit_SH1107& display, DeviceContext& ctx,
     _active     = true;
     _exitAction = MenuExitAction::NONE;
     _lastActivity = millis();
+    _entryTime    = millis();
     s_instance = this;
 
     Serial.println(F("Menu mode active"));
@@ -22,6 +23,18 @@ void MenuManager::begin(Adafruit_SH1107& display, DeviceContext& ctx,
 
 void MenuManager::update(ButtonManager& buttons) {
     if (!_active) return;
+
+    // ── Grace period: ignore inputs briefly after entry so the CALIB
+    //    press that opened the menu doesn't immediately select "Exit" ──
+    if (millis() - _entryTime < 300) {
+        // Drain edge flags so they don't fire after grace period ends
+        buttons.wasPressed(Button::MEASURE);
+        buttons.wasPressed(Button::DISCO);
+        buttons.wasPressed(Button::CALIB);
+        buttons.wasPressed(Button::SHUTDOWN);
+        buttons.wasPressed(Button::FIRE);
+        return;
+    }
 
     // ── Viewing cal metrics overlay: any button returns to menu ──
     if (_viewingCalMetrics) {
@@ -113,10 +126,10 @@ void MenuManager::buildMenu() {
     // ── Root menu items ────────────────────────────────
     _root.addAction("Exit", exitMenu);
     _root.addSubmenu("Enter Calibration", &_calSub);
-    _root.addSubmenu("Update Firmware", &_firmwareSub);
     _root.addSubmenu("Settings", &_settingsSub);
-    _root.addSubmenu("Delete saved shots", &_deleteSub);
     _root.addAction("Play Snake", enterSnakeGame);
+    _root.addSubmenu("Update Firmware", &_firmwareSub);
+    _root.addSubmenu("Delete saved shots", &_deleteSub);
 
     // ── Enter Calibration submenu ────────────────────────────────
     _calSub.addAction("Long Calibration", enterLongCalibration);

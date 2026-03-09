@@ -127,6 +127,9 @@ bool ConfigManager::loadConfig(Config& cfg) {
     cfg.calMagConsistency     = doc["cal_mag_consistency"]     | Defaults::calMagConsistency;
     cfg.calGravConsistency    = doc["cal_grav_consistency"]    | Defaults::calGravConsistency;
     cfg.calBufferLength       = doc["cal_buffer_length"]       | (int)Defaults::calBufferLength;
+    cfg.calSettleMs           = doc["cal_settle_ms"]           | (int)Defaults::calSettleMs;
+    cfg.calEmaAlpha           = doc["cal_ema_alpha"]           | Defaults::calEmaAlpha;
+    cfg.calTimeoutMs          = doc["cal_timeout_ms"]          | (int)Defaults::calTimeoutMs;
     cfg.autoShutdownTimeout   = doc["auto_shutdown_timeout"]   | Defaults::autoShutdownTimeout;
     cfg.laserTimeout          = doc["laser_timeout"]           | Defaults::laserTimeout;
     cfg.laserWibble           = doc["laser_wibble"]            | Defaults::laserWibble;
@@ -152,6 +155,8 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     if (!file) return false;
 
     JsonDocument doc;
+
+    // ── Settings values ──
     doc["mag_tolerance"]          = cfg.magTolerance;
     doc["grav_tolerance"]         = cfg.gravTolerance;
     doc["dip_tolerance"]          = cfg.dipTolerance;
@@ -165,6 +170,9 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["cal_mag_consistency"]    = cfg.calMagConsistency;
     doc["cal_grav_consistency"]   = cfg.calGravConsistency;
     doc["cal_buffer_length"]      = (int)cfg.calBufferLength;
+    doc["cal_settle_ms"]          = (int)cfg.calSettleMs;
+    doc["cal_ema_alpha"]          = cfg.calEmaAlpha;
+    doc["cal_timeout_ms"]         = (int)cfg.calTimeoutMs;
     doc["auto_shutdown_timeout"]  = cfg.autoShutdownTimeout;
     doc["laser_timeout"]          = cfg.laserTimeout;
     doc["laser_wibble"]           = cfg.laserWibble;
