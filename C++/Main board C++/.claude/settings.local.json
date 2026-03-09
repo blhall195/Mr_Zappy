@@ -11,7 +11,23 @@
       "Bash(python -m serial.tools.list_ports -v)",
       "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run -t upload)",
       "Bash(~/.platformio/penv/Scripts/platformio run)",
-      "Bash(~/.platformio/penv/Scripts/platformio run --target upload)"
+      "Bash(~/.platformio/penv/Scripts/platformio run --target upload)",
+      "Bash(pio run --target upload)",
+      "Bash(where platformio)",
+      "Read(//c/Users/Brendans-PC/Desktop/Mr_Zappy/C++/Main board C++/$HOME/.platformio/penv/**)",
+      "Read(//c/Users/Brendans-PC/Desktop/Mr_Zappy/C++/Main board C++/$USERPROFILE/.platformio/penv/**)",
+      "Read(//c/Users/Brendans-PC/.platformio/penv/Scripts//**)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run --target upload)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run --target upload --upload-port COM33)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe device list)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run --target upload -e adafruit_feather_m4_can --upload-port COM36)",
+      "Bash(~/.platformio/penv/Scripts/platformio.exe run)",
+      "Bash(~/.platformio/penv/Scripts/platformio.exe run --target upload)",
+      "Read(//c/Users/Brendans-PC/.platformio/penv/Scripts/**)",
+      "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run)",
+      "Bash(~/.platformio/penv/Scripts/pio run)",
+      "Bash(pip show uf2conv)",
+      "Bash(pip list)"
     ]
   }
 }

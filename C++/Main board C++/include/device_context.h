@@ -34,6 +34,9 @@ struct Config {
     float    calMagConsistency     = Defaults::calMagConsistency;
     float    calGravConsistency    = Defaults::calGravConsistency;
     uint8_t  calBufferLength       = Defaults::calBufferLength;
+    uint16_t calSettleMs           = Defaults::calSettleMs;
+    float    calEmaAlpha           = Defaults::calEmaAlpha;
+    uint16_t calTimeoutMs          = Defaults::calTimeoutMs;
     uint32_t autoShutdownTimeout   = Defaults::autoShutdownTimeout;
     uint32_t laserTimeout          = Defaults::laserTimeout;
     bool     laserWibble           = Defaults::laserWibble;

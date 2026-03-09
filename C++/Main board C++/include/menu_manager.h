@@ -61,6 +61,7 @@ private:
     bool              _active  = false;
     bool              _viewingCalMetrics = false;
     uint32_t          _lastActivity = 0;
+    uint32_t          _entryTime    = 0;      // for input grace period
     MenuExitAction    _exitAction = MenuExitAction::NONE;
 
     // Static singleton pointer for callbacks

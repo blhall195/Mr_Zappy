@@ -22,13 +22,21 @@ void CalibrationMode::begin(
     bufferLen_     = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
     magThreshold_  = config.calMagConsistency;
     gravThreshold_ = config.calGravConsistency;
+    settleMs_      = config.calSettleMs;
+    calEmaAlpha_   = config.calEmaAlpha;
+    calTimeoutMs_  = config.calTimeoutMs;
 
     // Clear data
     magArray_.clear();
     gravArray_.clear();
     bufferCount_ = 0;
     bufferIdx_ = 0;
+    emaInitialized_ = false;
     waitingForStable_ = false;
+    settleStart_ = 0;
+    accumMag_ = Eigen::Vector3f::Zero();
+    accumGrav_ = Eigen::Vector3f::Zero();
+    accumCount_ = 0;
     iteration_ = 0;
     holdCounter_ = 0.0f;
     beepActive_ = false;
@@ -150,15 +158,30 @@ void CalibrationMode::updateCollecting() {
     Eigen::Vector3f magReading, gravReading;
     readSensors(magReading, gravReading);
 
-    // Push into rolling circular buffer
-    magBuffer_[bufferIdx_] = magReading;
-    gravBuffer_[bufferIdx_] = gravReading;
+    // EMA pre-filter: smooth noise before consistency check
+    if (!emaInitialized_) {
+        emaMag_ = magReading;
+        emaGrav_ = gravReading;
+        emaInitialized_ = true;
+    } else {
+        emaMag_  = calEmaAlpha_ * magReading  + (1.0f - calEmaAlpha_) * emaMag_;
+        emaGrav_ = calEmaAlpha_ * gravReading + (1.0f - calEmaAlpha_) * emaGrav_;
+    }
+
+    // Push smoothed readings into rolling consistency buffer
+    magBuffer_[bufferIdx_] = emaMag_;
+    gravBuffer_[bufferIdx_] = emaGrav_;
     bufferIdx_ = (bufferIdx_ + 1) % bufferLen_;
     if (bufferCount_ < bufferLen_) bufferCount_++;
 
     // MEASURE button starts a capture attempt
     if (btns_->wasPressed(Button::MEASURE) && !waitingForStable_) {
         waitingForStable_ = true;
+        captureStart_ = now;
+        settleStart_ = 0;
+        accumMag_ = Eigen::Vector3f::Zero();
+        accumGrav_ = Eigen::Vector3f::Zero();
+        accumCount_ = 0;
         disco_->setRed();
     }
 
@@ -201,52 +224,38 @@ void CalibrationMode::updateCollecting() {
         bool gravConsistent = isConsistent(gravBuffer_, bufferLen_, gravThreshold_);
 
         if (magConsistent && gravConsistent) {
-            // Record averaged point
-            Eigen::Vector3f avgMag = average(magBuffer_, bufferLen_);
-            Eigen::Vector3f avgGrav = average(gravBuffer_, bufferLen_);
+            // Accumulate this sample into the averaging pool
+            accumMag_ += magReading;
+            accumGrav_ += gravReading;
+            accumCount_++;
 
-            recordPoint(avgMag, avgGrav);
-            disco_->setGreen();
-            beep();
-
-            iteration_++;
-            waitingForStable_ = false;
-            bufferCount_ = 0;
-            bufferIdx_ = 0;
-
-            // Update display
-            if (state_ == CalibState::COLLECTING_ELLIPSOID) {
-                updateCoverageBar(avgGrav);
-                showEllipsoidScreen();
-            } else {
-                showAlignmentProgress();
-
-                // Triple beep at direction changes (every 8 points)
-                if (iteration_ % 8 == 0 && iteration_ < targetCount_) {
-                    beepTriple();
-                    Serial.println(F("Change direction..."));
-                }
+            // Start settle timer on first consistent frame
+            if (settleStart_ == 0) {
+                settleStart_ = now;
             }
 
-            Serial.print(F("Point "));
-            Serial.print(iteration_);
-            Serial.print(F("/"));
-            Serial.println(targetCount_);
+            // Wait for settle duration before accepting
+            if (now - settleStart_ < settleMs_) {
+                return;  // keep accumulating
+            }
 
-            // Brief green flash then turn off LED
-            delay(200);
-            disco_->turnOff();
+            // Settle complete — record the averaged point
+            Eigen::Vector3f avgMag = accumMag_ / (float)accumCount_;
+            Eigen::Vector3f avgGrav = accumGrav_ / (float)accumCount_;
+            acceptPoint(avgMag, avgGrav);
+        } else {
+            // Consistency lost — reset settle timer and accumulator
+            if (settleStart_ != 0) {
+                settleStart_ = 0;
+                accumMag_ = Eigen::Vector3f::Zero();
+                accumGrav_ = Eigen::Vector3f::Zero();
+                accumCount_ = 0;
+            }
 
-            // Check if collection is complete
-            if (iteration_ >= targetCount_) {
-                Serial.println(F("Collection complete. Calculating..."));
-                if (state_ == CalibState::COLLECTING_ELLIPSOID) {
-                    state_ = CalibState::CALCULATING_ELLIPSOID;
-                } else if (isShortCal_) {
-                    state_ = CalibState::CALCULATING_SHORT;
-                } else {
-                    state_ = CalibState::CALCULATING_ALIGNMENT;
-                }
+            // Timeout — accept the current EMA-smoothed reading if we've waited too long
+            if (calTimeoutMs_ > 0 && (now - captureStart_) >= calTimeoutMs_) {
+                Serial.println(F("Stability timeout — accepting EMA reading"));
+                acceptPoint(emaMag_, emaGrav_);
             }
         }
     }
@@ -386,12 +395,14 @@ void CalibrationMode::readSensors(Eigen::Vector3f& mag, Eigen::Vector3f& grav) {
 
 bool CalibrationMode::isConsistent(const Eigen::Vector3f* buffer, int count,
                                    float threshold) const {
-    // Port of Python _is_consistent(): all samples within threshold of first
+    // Angular consistency: threshold is in degrees.
+    // Orientation-independent — same hand wobble passes/fails regardless of heading.
+    Eigen::Vector3f ref = buffer[0].normalized();
     for (int i = 1; i < count; i++) {
-        for (int j = 0; j < 3; j++) {
-            if (fabsf(buffer[i][j] - buffer[0][j]) > threshold) {
-                return false;
-            }
+        float dot = ref.dot(buffer[i].normalized());
+        float angleDeg = acosf(fminf(dot, 1.0f)) * 57.2958f;
+        if (angleDeg > threshold) {
+            return false;
         }
     }
     return true;
@@ -425,6 +436,53 @@ void CalibrationMode::updateCoverageBar(const Eigen::Vector3f& grav) {
     col = max(0, min(COV_COLS - 1, col));
 
     coverageZones_[row][col] = true;
+}
+
+void CalibrationMode::acceptPoint(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav) {
+    recordPoint(mag, grav);
+
+    Serial.print(F("Accepted point "));
+    disco_->setGreen();
+    beep();
+
+    iteration_++;
+    waitingForStable_ = false;
+    bufferCount_ = 0;
+    bufferIdx_ = 0;
+
+    // Update display
+    if (state_ == CalibState::COLLECTING_ELLIPSOID) {
+        updateCoverageBar(grav);
+        showEllipsoidScreen();
+    } else {
+        showAlignmentProgress();
+
+        // Triple beep at direction changes (every 8 points)
+        if (iteration_ % 8 == 0 && iteration_ < targetCount_) {
+            beepTriple();
+            Serial.println(F("Change direction..."));
+        }
+    }
+
+    Serial.print(iteration_);
+    Serial.print(F("/"));
+    Serial.println(targetCount_);
+
+    // Brief green flash then turn off LED
+    delay(200);
+    disco_->turnOff();
+
+    // Check if collection is complete
+    if (iteration_ >= targetCount_) {
+        Serial.println(F("Collection complete. Calculating..."));
+        if (state_ == CalibState::COLLECTING_ELLIPSOID) {
+            state_ = CalibState::CALCULATING_ELLIPSOID;
+        } else if (isShortCal_) {
+            state_ = CalibState::CALCULATING_SHORT;
+        } else {
+            state_ = CalibState::CALCULATING_ALIGNMENT;
+        }
+    }
 }
 
 // ── Display helpers ─────────────────────────────────────────────────
@@ -772,6 +830,9 @@ void CalibrationMode::beginFBCheck(
     bufferLen_     = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
     magThreshold_  = config.calMagConsistency;
     gravThreshold_ = config.calGravConsistency;
+    settleMs_      = config.calSettleMs;
+    calEmaAlpha_   = config.calEmaAlpha;
+    calTimeoutMs_  = config.calTimeoutMs;
 
     // Store config values for stability/leg checks
     fbStabilityTol_ = config.stabilityTolerance;
@@ -786,7 +847,12 @@ void CalibrationMode::beginFBCheck(
     holdCounter_ = 0.0f;
     bufferCount_ = 0;
     bufferIdx_ = 0;
+    emaInitialized_ = false;
     waitingForStable_ = false;
+    settleStart_ = 0;
+    accumMag_ = Eigen::Vector3f::Zero();
+    accumGrav_ = Eigen::Vector3f::Zero();
+    accumCount_ = 0;
     beepActive_ = false;
 
     // Clear leg-style shot buffers
