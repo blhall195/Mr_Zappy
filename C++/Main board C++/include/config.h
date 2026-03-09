@@ -57,7 +57,7 @@ namespace Defaults {
     constexpr bool     anomalyDetection      = false;
     constexpr float    stabilityTolerance    = 0.4f;    // degrees
     constexpr uint8_t  stabilityBufferLength = 3;
-    constexpr float    emaAlpha              = 0.5f;
+    constexpr float    emaAlpha              = 0.3f;
     constexpr float    legAngleTolerance     = 1.7f;    // degrees
     constexpr float    legDistanceTolerance  = 0.05f;   // meters
     constexpr float    laserDistanceOffset   = 0.162f;  // meters (device length)

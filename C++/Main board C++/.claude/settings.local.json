@@ -27,7 +27,10 @@
       "Bash(/c/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe run)",
       "Bash(~/.platformio/penv/Scripts/pio run)",
       "Bash(pip show uf2conv)",
-      "Bash(pip list)"
+      "Bash(pip list)",
+      "Bash(~/.platformio/penv/Scripts/pio run --target upload)",
+      "Bash(python3 ~/.platformio/packages/framework-arduinoadafruitnrf52/tools/uf2conv/uf2conv.py -c -f 0x55114460 -b 0x4000 -o \"c:/Users/Brendans-PC/Desktop/Mr_Zappy/C++/firmware.uf2\" \"c:/Users/Brendans-PC/Desktop/Mr_Zappy/C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.bin\")",
+      "Bash(~/.platformio/penv/Scripts/python ~/.platformio/packages/framework-arduinoadafruitnrf52/tools/uf2conv/uf2conv.py -c -f 0x55114460 -b 0x4000 -o \"c:/Users/Brendans-PC/Desktop/Mr_Zappy/C++/firmware.uf2\" \"c:/Users/Brendans-PC/Desktop/Mr_Zappy/C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.bin\")"
     ]
   }
 }
