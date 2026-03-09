@@ -40,6 +40,8 @@ void CalibrationMode::begin(
     iteration_ = 0;
     holdCounter_ = 0.0f;
     beepActive_ = false;
+    laserWibbleActive_ = false;
+    laserOnTime_ = 0;
     resultMagAcc_ = 0.0f;
     resultGravAcc_ = 0.0f;
     resultAccuracy_ = 0.0f;
@@ -457,9 +459,9 @@ void CalibrationMode::acceptPoint(const Eigen::Vector3f& mag, const Eigen::Vecto
     } else {
         showAlignmentProgress();
 
-        // Triple beep at direction changes (every 8 points)
+        // Single beep at direction changes (every 8 points)
         if (iteration_ % 8 == 0 && iteration_ < targetCount_) {
-            beepTriple();
+            beep();
             Serial.println(F("Change direction..."));
         }
     }
@@ -471,6 +473,13 @@ void CalibrationMode::acceptPoint(const Eigen::Vector3f& mag, const Eigen::Vecto
     // Brief green flash then turn off LED
     delay(200);
     disco_->turnOff();
+
+    // Alignment/short cal: laser off for 500ms then back on (visual feedback)
+    if (state_ == CalibState::COLLECTING_ALIGNMENT) {
+        laser_->setLaser(false);
+        laserWibbleActive_ = true;
+        laserOnTime_ = millis() + 500;
+    }
 
     // Check if collection is complete
     if (iteration_ >= targetCount_) {
@@ -706,9 +715,12 @@ void CalibrationMode::showSavingScreen() {
 // ── Beep control ────────────────────────────────────────────────────
 
 void CalibrationMode::beep() {
+    // Match normal measurement success beep pattern
+    delay(25);
     laser_->setBuzzer(true);
-    beepActive_ = true;
-    beepEndTime_ = millis() + 200;
+    delay(100);
+    laser_->setBuzzer(false);
+    delay(25);
 }
 
 void CalibrationMode::beepTriple() {
@@ -722,6 +734,11 @@ void CalibrationMode::updateBeep() {
     if (beepActive_ && millis() >= beepEndTime_) {
         beepActive_ = false;
         // Buzzer auto-stops on Egismos, but explicit off is harmless
+    }
+    // Laser wibble: turn laser back on after 500ms off
+    if (laserWibbleActive_ && millis() >= laserOnTime_) {
+        laser_->setLaser(true);
+        laserWibbleActive_ = false;
     }
 }
 
