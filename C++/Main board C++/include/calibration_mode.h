@@ -130,6 +130,8 @@ private:
     uint32_t lastSampleTime_ = 0;
     uint32_t beepEndTime_ = 0;
     bool beepActive_ = false;
+    uint32_t laserOnTime_ = 0;      // millis() when laser should turn back on (0 = inactive)
+    bool laserWibbleActive_ = false;
 
     // ── F/B check data ──
     static constexpr int FB_MAX_PAIRS = 10;
