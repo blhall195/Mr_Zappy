@@ -881,7 +881,7 @@ void CalibrationMode::beginFBCheck(
     fbCurrentBearing_ = 0.0f;
     fbLastDisplayTime_ = 0;
     fbEmaAz_ = 0.0f;
-    fbEmaAlpha_ = config.emaAlpha;
+    fbEmaAlpha_ = config.emaAlphaMoving;
     fbEmaSeeded_ = false;
 
     // Turn on laser

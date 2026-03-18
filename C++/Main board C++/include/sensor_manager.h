@@ -8,7 +8,8 @@ class SensorManager {
 public:
     /// Initialise with calibration reference and tuning parameters
     void init(const MagCal::Calibration* cal,
-              float emaAlpha, uint8_t stabilityLen);
+              float emaAlphaStable, float emaAlphaMoving,
+              uint8_t stabilityLen);
 
     /// Feed raw sensor readings; updates angles and EMA
     void update(const Eigen::Vector3f& rawMag,
@@ -31,7 +32,8 @@ private:
     float emaAz_  = 0.0f;
     float emaInc_ = 0.0f;
     float roll_   = 0.0f;
-    float emaAlpha_ = 0.5f;
+    float emaAlphaStable_ = 0.05f;
+    float emaAlphaMoving_ = 0.3f;
     bool emaSeeded_ = false;
 
     // Stability ring buffer
@@ -42,11 +44,30 @@ private:
     uint8_t stabCount_ = 0;
     uint8_t stabLen_   = 3;
 
+    // Median pre-filter (5-sample, kills up to 2 consecutive spikes)
+    static constexpr uint8_t MEDIAN_LEN = 5;
+    float medAzBuf_[MEDIAN_LEN]  = {};
+    float medIncBuf_[MEDIAN_LEN] = {};
+    uint8_t medHead_  = 0;
+    uint8_t medCount_ = 0;
+
     // Calibration (not owned)
     const MagCal::Calibration* cal_ = nullptr;
 
     // ── Internal helpers ─────────────────────────────────────────────
     void pushStability(float az, float inc);
+
+    /// Push raw angles into median buffer; returns true when buffer is full
+    bool pushMedian(float az, float inc);
+
+    /// Get median azimuth from buffer (circular-aware)
+    float medianAzimuth() const;
+
+    /// Get median inclination from buffer
+    float medianInclination() const;
+
+    /// Median of a small array (sorts in place)
+    static float medianN(float* vals, uint8_t n);
 
     /// Circular EMA for azimuth (handles 0/360 wraparound)
     static float circularEma(float prev, float next, float alpha);

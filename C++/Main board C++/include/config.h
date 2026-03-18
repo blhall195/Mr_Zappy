@@ -55,13 +55,16 @@ namespace Defaults {
     constexpr float    gravTolerance         = 10.0f;   // degrees
     constexpr float    dipTolerance          = 10.0f;   // degrees
     constexpr bool     anomalyDetection      = false;
-    constexpr float    stabilityTolerance    = 0.4f;    // degrees
-    constexpr uint8_t  stabilityBufferLength = 3;
-    constexpr float    emaAlpha              = 0.3f;
+    constexpr float    stabilityTolerance    = 0.3f;    // degrees
+    constexpr uint8_t  stabilityBufferLength = 5;
+    constexpr float    emaAlphaStable        = 0.05f;   // low alpha when stationary (max smoothing)
+    constexpr float    emaAlphaMoving        = 0.3f;    // high alpha when moving (responsive)
     constexpr float    legAngleTolerance     = 1.7f;    // degrees
     constexpr float    legDistanceTolerance  = 0.05f;   // meters
     constexpr float    laserDistanceOffset   = 0.162f;  // meters (device length)
     constexpr float    quickShotStabilityTol = 1.0f;    // degrees (wider for quick shot)
+    constexpr float    gyroFreezeThreshold   = 0.02f;   // rad/s — below this gyro magnitude, display freezes
+    constexpr uint16_t gyroSettleMs          = 1500;    // ms to keep updating after gyro goes still (EMA settle)
     constexpr float    calMagConsistency     = 0.5f;   // degrees (angular consistency window for mag)
     constexpr float    calGravConsistency    = 0.4f;   // degrees (angular consistency window for gravity)
     constexpr uint8_t  calBufferLength       = 5;      // samples for calibration consistency window
@@ -79,7 +82,7 @@ namespace Defaults {
 // ── Timing constants ────────────────────────────────────────────────
 namespace Timing {
     constexpr uint32_t BUTTON_DEBOUNCE_MS       = 10;
-    constexpr uint32_t SENSOR_POLL_MS           = 20;     // 50 Hz idle
+    constexpr uint32_t SENSOR_POLL_MS           = 10;     // ~90 Hz (matches RM3100 CC300 rate)
     constexpr uint32_t SENSOR_MEASURE_POLL_MS   = 100;    // 10 Hz measuring
     constexpr uint32_t BUTTON_POLL_MS           = 50;
     constexpr uint32_t BATTERY_CHECK_MS         = 30000;  // 30 sec
