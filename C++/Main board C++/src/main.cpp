@@ -1376,7 +1376,7 @@ static void updateDisplay(uint32_t now) {
         float gyroMag = sqrtf(lastGyroX * lastGyroX +
                               lastGyroY * lastGyroY +
                               lastGyroZ * lastGyroZ);
-        bool moving = gyroMag > ctx.config.gyroFreezeThreshold;
+        bool moving = gyroMag > Defaults::gyroFreezeThreshold;
         if (moving) {
             gyroStillSince = now;  // reset settle timer
             // Device is moving — update displayed values (with deadband)
@@ -1384,7 +1384,7 @@ static void updateDisplay(uint32_t now) {
                 dispAz = liveAz;
             if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
                 dispInc = liveInc;
-        } else if ((now - gyroStillSince) < ctx.config.gyroSettleMs) {
+        } else if ((now - gyroStillSince) < Defaults::gyroSettleMs) {
             // Still settling — keep updating so EMA can converge
             if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
                 dispAz = liveAz;
@@ -1392,7 +1392,9 @@ static void updateDisplay(uint32_t now) {
                 dispInc = liveInc;
         } else {
             // Settled — only update if reading drifts by a full 0.1°
-            if (SensorManager::circularDiff(liveAz, dispAz) > 0.1f)
+            // Suppress updates that cross the 0/360 boundary (noise-induced flicker)
+            if (SensorManager::circularDiff(liveAz, dispAz) > 0.1f &&
+                fabsf(liveAz - dispAz) < 180.0f)
                 dispAz = liveAz;
             if (fabsf(liveInc - dispInc) > 0.1f)
                 dispInc = liveInc;
