@@ -101,6 +101,7 @@ static bool enterSnakeMode = false;
 // Latest sensor readings
 static float lastMagX = 0, lastMagY = 0, lastMagZ = 0;
 static float lastAccX = 0, lastAccY = 0, lastAccZ = 0;
+static float lastGyroX = 0, lastGyroY = 0, lastGyroZ = 0;
 
 static float lastDistance = 0;
 
@@ -108,6 +109,7 @@ static float lastDistance = 0;
 static float dispAz   = 0.0f;   // currently displayed azimuth
 static float dispInc  = 0.0f;   // currently displayed inclination
 static constexpr float DEADBAND_ANGLE = 0.15f;  // degrees
+static uint32_t gyroStillSince = 0;  // millis() when gyro first dropped below threshold
 
 // ── Timing statics ──────────────────────────────────────────────────
 static uint32_t lastSensorUpdate    = 0;
@@ -287,6 +289,9 @@ void setup() {
 
     // ── Sensors ──
     magOk = mag.begin(Wire, RM3100_I2C_ADDR, RM3100_CYCLE_COUNT, PIN_MAG_DRDY);
+    if (magOk) {
+        mag.startSingleReading();  // kick off first non-blocking read
+    }
     Serial.print(F("RM3100:      "));
     Serial.println(magOk ? F("OK") : F("FAILED"));
 
@@ -568,7 +573,8 @@ void loop() {
             }
             calOk = calibration.isCalibrated();
             if (calOk) {
-                sensorMgr.init(&calibration, ctx.config.emaAlpha,
+                sensorMgr.init(&calibration, ctx.config.emaAlphaStable,
+                               ctx.config.emaAlphaMoving,
                                ctx.config.stabilityBufferLength);
             }
             display.initScreen();
@@ -618,9 +624,10 @@ static void readSensorsUpdate(uint32_t now) {
 
     lastSensorUpdate = now;
 
-    if (magOk) {
-        RM3100::Reading mr = mag.readSingle();
+    if (magOk && mag.measurementComplete()) {
+        RM3100::Reading mr = mag.getLastReading();
         mag.toMicroTesla(mr, lastMagX, lastMagY, lastMagZ);
+        mag.startSingleReading();  // immediately kick off next measurement
     }
 
     if (imuOk) {
@@ -629,6 +636,9 @@ static void readSensorsUpdate(uint32_t now) {
         lastAccX = accel.acceleration.x;
         lastAccY = accel.acceleration.y;
         lastAccZ = accel.acceleration.z;
+        lastGyroX = gyro.gyro.x;
+        lastGyroY = gyro.gyro.y;
+        lastGyroZ = gyro.gyro.z;
     }
 
     if (calOk && magOk && imuOk) {
@@ -930,6 +940,8 @@ static void pollMeasurement(uint32_t now) {
             Serial.print(F("MEAS: anomaly: ")); Serial.println(errStr);
             alertError(errStr);
             // Still update display with the readings
+            dispAz  = ctx.readings.azimuth;
+            dispInc = ctx.readings.inclination;
             if (dispOk) {
                 display.updateSensorReadings(ctx.readings.distance,
                                              ctx.readings.azimuth,
@@ -956,6 +968,8 @@ static void pollMeasurement(uint32_t now) {
     }
 
     // Freeze display — stays showing shot readings until next button press
+    dispAz  = ctx.readings.azimuth;
+    dispInc = ctx.readings.inclination;
     ctx.displayFrozen = true;
 
     // Laser off after shot — user presses MEASURE/FIRE to re-enable
@@ -1357,11 +1371,32 @@ static void updateDisplay(uint32_t now) {
                       * (180.0f / PI);
         }
 
-        // Deadband: only update displayed value when reading moves enough
-        if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
-            dispAz = liveAz;
-        if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
-            dispInc = liveInc;
+        // Gyro-gated freeze: only update displayed values when device is moving.
+        // A short settle delay lets the EMA converge before locking.
+        float gyroMag = sqrtf(lastGyroX * lastGyroX +
+                              lastGyroY * lastGyroY +
+                              lastGyroZ * lastGyroZ);
+        bool moving = gyroMag > ctx.config.gyroFreezeThreshold;
+        if (moving) {
+            gyroStillSince = now;  // reset settle timer
+            // Device is moving — update displayed values (with deadband)
+            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
+                dispAz = liveAz;
+            if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
+                dispInc = liveInc;
+        } else if ((now - gyroStillSince) < ctx.config.gyroSettleMs) {
+            // Still settling — keep updating so EMA can converge
+            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
+                dispAz = liveAz;
+            if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
+                dispInc = liveInc;
+        } else {
+            // Settled — only update if reading drifts by a full 0.1°
+            if (SensorManager::circularDiff(liveAz, dispAz) > 0.1f)
+                dispAz = liveAz;
+            if (fabsf(liveInc - dispInc) > 0.1f)
+                dispInc = liveInc;
+        }
 
         display.updateSensorReadings(lastDistance, dispAz, dispInc);
     }
@@ -1596,10 +1631,13 @@ static void initCalibration() {
         Serial.print(F("  Dip avg:   ")); Serial.print(calibration.dipAvg(), 1);
         Serial.println(F(" deg"));
 
-        sensorMgr.init(&calibration, ctx.config.emaAlpha,
+        sensorMgr.init(&calibration, ctx.config.emaAlphaStable,
+                        ctx.config.emaAlphaMoving,
                         ctx.config.stabilityBufferLength);
-        Serial.print(F("  Filter:    EMA alpha="));
-        Serial.print(ctx.config.emaAlpha, 2);
+        Serial.print(F("  Filter:    EMA stable="));
+        Serial.print(ctx.config.emaAlphaStable, 2);
+        Serial.print(F(", moving="));
+        Serial.print(ctx.config.emaAlphaMoving, 2);
         Serial.print(F(", stability buf="));
         Serial.println(ctx.config.stabilityBufferLength);
     } else {
