@@ -29,8 +29,6 @@ struct Config {
     uint8_t  stabilityBufferLength = Defaults::stabilityBufferLength;
     float    emaAlphaStable        = Defaults::emaAlphaStable;
     float    emaAlphaMoving        = Defaults::emaAlphaMoving;
-    float    gyroFreezeThreshold   = Defaults::gyroFreezeThreshold;
-    uint16_t gyroSettleMs          = Defaults::gyroSettleMs;
     float    legAngleTolerance     = Defaults::legAngleTolerance;
     float    legDistanceTolerance  = Defaults::legDistanceTolerance;
     float    laserDistanceOffset   = Defaults::laserDistanceOffset;

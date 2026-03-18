@@ -122,8 +122,6 @@ bool ConfigManager::loadConfig(Config& cfg) {
     cfg.stabilityBufferLength = doc["stability_buffer_length"] | (int)Defaults::stabilityBufferLength;
     cfg.emaAlphaStable        = doc["ema_alpha_stable"]        | Defaults::emaAlphaStable;
     cfg.emaAlphaMoving        = doc["ema_alpha_moving"]        | Defaults::emaAlphaMoving;
-    cfg.gyroFreezeThreshold   = doc["gyro_freeze_threshold"]   | Defaults::gyroFreezeThreshold;
-    cfg.gyroSettleMs          = doc["gyro_settle_ms"]          | (int)Defaults::gyroSettleMs;
     cfg.legAngleTolerance     = doc["leg_angle_tolerance"]     | Defaults::legAngleTolerance;
     cfg.legDistanceTolerance  = doc["leg_distance_tolerance"]  | Defaults::legDistanceTolerance;
     cfg.laserDistanceOffset   = doc["laser_distance_offset"]   | Defaults::laserDistanceOffset;
@@ -168,8 +166,6 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["stability_buffer_length"]= (int)cfg.stabilityBufferLength;
     doc["ema_alpha_stable"]       = cfg.emaAlphaStable;
     doc["ema_alpha_moving"]       = cfg.emaAlphaMoving;
-    doc["gyro_freeze_threshold"]  = cfg.gyroFreezeThreshold;
-    doc["gyro_settle_ms"]         = (int)cfg.gyroSettleMs;
     doc["leg_angle_tolerance"]    = cfg.legAngleTolerance;
     doc["leg_distance_tolerance"] = cfg.legDistanceTolerance;
     doc["laser_distance_offset"]  = cfg.laserDistanceOffset;
