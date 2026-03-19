@@ -110,6 +110,9 @@ static float dispAz   = 0.0f;   // currently displayed azimuth
 static float dispInc  = 0.0f;   // currently displayed inclination
 static constexpr float DEADBAND_ANGLE = 0.15f;  // degrees
 static uint32_t gyroStillSince = 0;  // millis() when gyro first dropped below threshold
+static float anchorAz  = 0.0f;  // azimuth when gyro settled — display clamped to ±0.1°
+static float anchorInc = 0.0f;  // inclination when gyro settled
+static bool  anchored  = false;  // true once settle period has elapsed
 
 // ── Timing statics ──────────────────────────────────────────────────
 static uint32_t lastSensorUpdate    = 0;
@@ -1379,6 +1382,7 @@ static void updateDisplay(uint32_t now) {
         bool moving = gyroMag > Defaults::gyroFreezeThreshold;
         if (moving) {
             gyroStillSince = now;  // reset settle timer
+            anchored = false;
             // Device is moving — update displayed values (with deadband)
             if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
                 dispAz = liveAz;
@@ -1391,13 +1395,23 @@ static void updateDisplay(uint32_t now) {
             if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
                 dispInc = liveInc;
         } else {
-            // Settled — only update if reading drifts by a full 0.1°
-            // Suppress updates that cross the 0/360 boundary (noise-induced flicker)
-            if (SensorManager::circularDiff(liveAz, dispAz) > 0.1f &&
-                fabsf(liveAz - dispAz) < 180.0f)
-                dispAz = liveAz;
-            if (fabsf(liveInc - dispInc) > 0.1f)
-                dispInc = liveInc;
+            // Settled — lock anchor point, clamp display to ±0.1° from anchor
+            if (!anchored) {
+                anchorAz  = dispAz;
+                anchorInc = dispInc;
+                anchored  = true;
+            }
+            // Clamp azimuth to anchor ±0.1° (circular)
+            float azDiff = liveAz - anchorAz;
+            if (azDiff > 180.0f)  azDiff -= 360.0f;
+            if (azDiff < -180.0f) azDiff += 360.0f;
+            float clampedAz = anchorAz + fmaxf(-0.1f, fminf(0.1f, azDiff));
+            if (clampedAz < 0.0f)    clampedAz += 360.0f;
+            if (clampedAz >= 360.0f) clampedAz -= 360.0f;
+            dispAz = clampedAz;
+            // Clamp inclination to anchor ±0.1°
+            float incDiff = liveInc - anchorInc;
+            dispInc = anchorInc + fmaxf(-0.1f, fminf(0.1f, incDiff));
         }
 
         display.updateSensorReadings(lastDistance, dispAz, dispInc);
