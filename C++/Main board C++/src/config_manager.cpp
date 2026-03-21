@@ -4,6 +4,7 @@
 
 #include "SdFat.h"
 #include "Adafruit_SPIFlash.h"
+#include "FatLib/FatFormatter.h"
 #include <ArduinoJson.h>
 
 // ── Flash & filesystem (file-scope — transport must not be copied) ──
@@ -30,8 +31,29 @@ bool ConfigManager::begin() {
     Serial.println(F(" KB"));
 
     if (!s_fatfs.begin(&s_flash)) {
-        Serial.println(F("FAT mount FAILED — flash may need formatting"));
-        return false;
+        Serial.println(F("FAT mount FAILED — attempting auto-reformat..."));
+
+        // Erase chip and create a fresh FAT filesystem
+        if (!s_flash.eraseChip()) {
+            Serial.println(F("  Flash erase FAILED"));
+            return false;
+        }
+
+        FatFormatter formatter;
+        uint8_t workBuf[512];
+        if (!formatter.format(&s_flash, workBuf, &Serial)) {
+            Serial.println(F("  FAT format FAILED"));
+            return false;
+        }
+        s_flash.syncBlocks();
+
+        // Try mounting the freshly formatted filesystem
+        if (!s_fatfs.begin(&s_flash)) {
+            Serial.println(F("  Mount after format FAILED"));
+            return false;
+        }
+        Serial.println(F("  Auto-reformat successful — flash recovered"));
+        reformatted_ = true;
     }
 
     // Update volume label from "CIRCUITPY" to "DISCOX" via raw flash sectors.
@@ -149,10 +171,10 @@ bool ConfigManager::loadConfig(Config& cfg) {
 bool ConfigManager::saveConfig(const Config& cfg) {
     if (!mounted_) return false;
 
-    // Remove first — SdFat FILE_WRITE doesn't truncate
-    s_fatfs.remove("/config.json");
+    // Atomic write: write to temp file, sync, then replace original.
+    s_fatfs.remove("/cfg_tmp.json");
 
-    File32 file = s_fatfs.open("/config.json", FILE_WRITE);
+    File32 file = s_fatfs.open("/cfg_tmp.json", FILE_WRITE);
     if (!file) return false;
 
     JsonDocument doc;
@@ -182,8 +204,16 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["ble_name"]               = cfg.bleName;
 
     size_t written = serializeJsonPretty(doc, file);
+    file.sync();
     file.close();
-    return written > 0;
+    if (written == 0) {
+        s_fatfs.remove("/cfg_tmp.json");
+        return false;
+    }
+
+    s_fatfs.remove("/config.json");
+    s_fatfs.rename("/cfg_tmp.json", "/config.json");
+    return true;
 }
 
 // ── Calibration data ───────────────────────────────────────────────
@@ -209,14 +239,24 @@ bool ConfigManager::loadCalibrationJson(char* buf, size_t bufSize, size_t& bytes
 bool ConfigManager::saveCalibrationJson(const char* json, size_t len) {
     if (!mounted_) return false;
 
-    s_fatfs.remove("/calibration.json");
+    // Atomic write: write to temp file, sync, then replace original.
+    // If power dies during write, old calibration file remains intact.
+    s_fatfs.remove("/cal_tmp.json");
 
-    File32 file = s_fatfs.open("/calibration.json", FILE_WRITE);
+    File32 file = s_fatfs.open("/cal_tmp.json", FILE_WRITE);
     if (!file) return false;
 
     size_t written = file.write(json, len);
+    file.sync();
     file.close();
-    return written == len;
+    if (written != len) {
+        s_fatfs.remove("/cal_tmp.json");
+        return false;
+    }
+
+    s_fatfs.remove("/calibration.json");
+    s_fatfs.rename("/cal_tmp.json", "/calibration.json");
+    return true;
 }
 
 bool ConfigManager::loadCalibrationBinary(MagCal::CalibrationBinary& out) {
@@ -239,26 +279,43 @@ bool ConfigManager::loadCalibrationBinary(MagCal::CalibrationBinary& out) {
 bool ConfigManager::saveCalibrationBinary(const MagCal::CalibrationBinary& data) {
     if (!mounted_) return false;
 
-    s_fatfs.remove("/calibration.bin");
+    // Atomic write: write to temp file, sync, then replace original.
+    // If power dies during write, old calibration file remains intact.
+    s_fatfs.remove("/cal_tmp.bin");
 
-    File32 file = s_fatfs.open("/calibration.bin", FILE_WRITE);
+    File32 file = s_fatfs.open("/cal_tmp.bin", FILE_WRITE);
     if (!file) return false;
 
     size_t written = file.write(reinterpret_cast<const uint8_t*>(&data), sizeof(data));
+    file.sync();
     file.close();
-    return written == sizeof(data);
+    if (written != sizeof(data)) {
+        s_fatfs.remove("/cal_tmp.bin");
+        return false;
+    }
+
+    s_fatfs.remove("/calibration.bin");
+    s_fatfs.rename("/cal_tmp.bin", "/calibration.bin");
+    return true;
 }
 
 // ── Calibration quality metrics ─────────────────────────────────────
 
 bool ConfigManager::saveCalMetrics(const CalMetrics& m) {
     if (!mounted_) return false;
-    s_fatfs.remove("/cal_metrics.bin");
-    File32 file = s_fatfs.open("/cal_metrics.bin", FILE_WRITE);
+    s_fatfs.remove("/met_tmp.bin");
+    File32 file = s_fatfs.open("/met_tmp.bin", FILE_WRITE);
     if (!file) return false;
     size_t written = file.write(reinterpret_cast<const uint8_t*>(&m), sizeof(m));
+    file.sync();
     file.close();
-    return written == sizeof(m);
+    if (written != sizeof(m)) {
+        s_fatfs.remove("/met_tmp.bin");
+        return false;
+    }
+    s_fatfs.remove("/cal_metrics.bin");
+    s_fatfs.rename("/met_tmp.bin", "/cal_metrics.bin");
+    return true;
 }
 
 bool ConfigManager::loadCalMetrics(CalMetrics& m) {

@@ -93,6 +93,7 @@ bool dispOk  = false;
 bool laserOk = false;
 bool bleOk   = false;
 bool calOk   = false;
+bool calFromFlash = false;  // true = loaded from QSPI, false = PROGMEM fallback
 bool flashOk = false;
 static bool enterMenuMode  = false;
 static bool enterCalibMode = false;
@@ -104,6 +105,14 @@ static float lastAccX = 0, lastAccY = 0, lastAccZ = 0;
 static float lastGyroX = 0, lastGyroY = 0, lastGyroZ = 0;
 
 static float lastDistance = 0;
+
+// ── Boot-time field strength sanity check ────────────────────────────
+// After N sensor readings, compare calibrated field strength to expected.
+// Catches stale calibration AND sensor remagnetization.
+static constexpr uint8_t  FIELD_CHECK_AFTER_SAMPLES = 20;  // let EMA settle
+static constexpr float    FIELD_CHECK_TOLERANCE     = 0.15f; // 15%
+static uint8_t  fieldCheckCounter = 0;
+static bool     fieldCheckDone    = false;
 
 // ── Display deadband (prevents ±0.1 flicker when stationary) ────────
 static float dispAz   = 0.0f;   // currently displayed azimuth
@@ -326,6 +335,27 @@ void setup() {
     initLaser();
     initBle();
     initFlash();
+
+    // Warn user if flash was auto-reformatted (all saved data lost)
+    if (flashOk && configMgr.wasReformatted() && dispOk) {
+        auto& disp = display.getDisplay();
+        display.blankScreen();
+        disp.setTextColor(SH110X_WHITE);
+        disp.setTextSize(2);
+        disp.setCursor(0, 10);
+        disp.println(F("FLASH"));
+        disp.println(F("RECOVERED"));
+        disp.setTextSize(1);
+        disp.println();
+        disp.println(F("Storage was corrupt."));
+        disp.println(F("Reformatted OK."));
+        disp.println();
+        disp.println(F("Calibration &"));
+        disp.println(F("settings were lost."));
+        disp.display();
+        delay(5000);
+    }
+
     initCalibration();
     initDisco();
 
@@ -648,6 +678,33 @@ static void readSensorsUpdate(uint32_t now) {
         Eigen::Vector3f rawMag(lastMagX, lastMagY, lastMagZ);
         Eigen::Vector3f rawGrav(lastAccX, lastAccY, lastAccZ);
         sensorMgr.update(rawMag, rawGrav);
+
+        // Boot-time sanity check: after EMA settles, verify field strength
+        if (!fieldCheckDone && ++fieldCheckCounter >= FIELD_CHECK_AFTER_SAMPLES) {
+            fieldCheckDone = true;
+            float expectedMag = calibration.mag().fieldAvg();
+            if (expectedMag > 0.0f) {
+                float actualMag = calibration.mag().getFieldStrength(rawMag);
+                float deviation = fabsf(actualMag - expectedMag) / expectedMag;
+                Serial.print(F("Field check: expected="));
+                Serial.print(expectedMag, 2);
+                Serial.print(F(" actual="));
+                Serial.print(actualMag, 2);
+                Serial.print(F(" dev="));
+                Serial.print(deviation * 100.0f, 1);
+                Serial.println(F("%"));
+                if (deviation > FIELD_CHECK_TOLERANCE) {
+                    Serial.println(F("WARNING: field strength deviation >15% — calibration may be invalid"));
+                    if (dispOk) {
+                        display.updateDistanceText("CAL?");
+                        display.refresh();
+                        disco.setRed();
+                        delay(3000);
+                        disco.turnOff();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1444,6 +1501,10 @@ static void doShutdown() {
         configMgr.syncPendingToFlash();
     }
     Serial.flush();
+    // Allow QSPI flash to finish internal page programming before power cut.
+    // QSPI NOR flash typical page-program time is 0.4-3ms, but FAT metadata
+    // updates may involve multiple pages. 100ms provides ample margin.
+    delay(100);
     digitalWrite(PIN_POWER, LOW);
     // If still running (USB-powered), just hang
     while (true) { delay(1000); }
@@ -1607,6 +1668,7 @@ static void initCalibration() {
     Serial.print(F("Calibration: "));
 
     bool loaded = false;
+    calFromFlash = false;
 
     // 1. Try binary from flash (fastest — no JSON parse)
     if (flashOk) {
@@ -1614,6 +1676,7 @@ static void initCalibration() {
         if (configMgr.loadCalibrationBinary(bin)) {
             loaded = calibration.fromBinary(bin);
             if (loaded) {
+                calFromFlash = true;
                 Serial.println(F("OK (from binary)"));
             }
         }
@@ -1626,6 +1689,7 @@ static void initCalibration() {
         if (configMgr.loadCalibrationJson(calBuf, sizeof(calBuf), calLen)) {
             loaded = calibration.fromJson(calBuf, calLen);
             if (loaded) {
+                calFromFlash = true;
                 Serial.println(F("OK (from flash JSON)"));
             }
         }
@@ -1635,7 +1699,7 @@ static void initCalibration() {
     if (!loaded) {
         loaded = calibration.fromJson(CALIBRATION_JSON, sizeof(CALIBRATION_JSON) - 1);
         if (loaded) {
-            Serial.println(F("OK (from PROGMEM)"));
+            Serial.println(F("WARNING: using PROGMEM fallback — calibration may be stale!"));
         }
     }
 
@@ -1656,6 +1720,28 @@ static void initCalibration() {
         Serial.print(ctx.config.emaAlphaMoving, 2);
         Serial.print(F(", stability buf="));
         Serial.println(ctx.config.stabilityBufferLength);
+
+        // Warn user if calibration came from PROGMEM (stale compile-time data)
+        if (!calFromFlash && dispOk) {
+            display.blankScreen();
+            auto& disp = display.getDisplay();
+            disp.setTextColor(SH110X_WHITE);
+            disp.setTextSize(2);
+            disp.setCursor(0, 10);
+            disp.println(F("NOT"));
+            disp.println(F("CALIBRATED"));
+            disp.setTextSize(1);
+            disp.println();
+            disp.println(F("Using stale built-in"));
+            disp.println(F("calibration data."));
+            disp.println();
+            disp.println(F("Recalibrate before"));
+            disp.println(F("surveying!"));
+            disp.display();
+            disco.setRed();
+            delay(4000);
+            disco.turnOff();
+        }
     } else {
         Serial.println(F("FAILED — using raw angles"));
     }

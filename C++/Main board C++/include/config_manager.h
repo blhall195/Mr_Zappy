@@ -21,6 +21,9 @@ public:
 
     bool isReady() const { return mounted_; }
 
+    // True if filesystem was auto-reformatted this boot (data was lost)
+    bool wasReformatted() const { return reformatted_; }
+
     // Expose the internal QSPI flash object (for USB MSC block callbacks)
     Adafruit_SPIFlash* getFlash();
 
@@ -93,6 +96,7 @@ public:
 
 private:
     bool mounted_ = false;
+    bool reformatted_ = false;  // set if FAT was auto-reformatted this boot
 
     // RAM buffer for pending readings (avoids QSPI writes mid-measurement)
     static const uint8_t MAX_PENDING_BUF = 20;
