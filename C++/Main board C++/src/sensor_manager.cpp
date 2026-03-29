@@ -5,10 +5,11 @@
 
 void SensorManager::init(const MagCal::Calibration* cal,
                          float emaAlphaStable, float emaAlphaMoving,
-                         uint8_t stabilityLen) {
+                         uint8_t stabilityLen, float jumpThreshold) {
     cal_             = cal;
     emaAlphaStable_  = emaAlphaStable;
     emaAlphaMoving_  = emaAlphaMoving;
+    jumpThreshold_   = jumpThreshold;
     stabLen_         = (stabilityLen > MAX_STAB_BUF) ? MAX_STAB_BUF : stabilityLen;
     resetStability();
 
@@ -23,7 +24,8 @@ void SensorManager::init(const MagCal::Calibration* cal,
 // ── Main update ─────────────────────────────────────────────────────
 
 void SensorManager::update(const Eigen::Vector3f& rawMag,
-                           const Eigen::Vector3f& rawAccel) {
+                           const Eigen::Vector3f& rawAccel,
+                           bool gyroMoving) {
     if (!cal_) return;
 
     // 1) Compute angles directly from calibrated mag + raw accel
@@ -37,19 +39,34 @@ void SensorManager::update(const Eigen::Vector3f& rawMag,
     float filtAz  = medianAzimuth();
     float filtInc = medianInclination();
 
-    // 3) EMA smooth — adaptive alpha: low when stable, high when moving
-    float alpha = isStable(2.0f) ? emaAlphaStable_ : emaAlphaMoving_;
+    // 3) EMA smooth — adaptive alpha: low when gyro is still (max smoothing),
+    //    high when gyro says device is moving (fast tracking).
+    //    Jump detection: snap EMA directly when error exceeds threshold
+    float alpha = gyroMoving ? emaAlphaMoving_ : emaAlphaStable_;
     if (!emaSeeded_) {
         emaAz_  = filtAz;
         emaInc_ = filtInc;
         emaSeeded_ = true;
     } else {
-        emaAz_  = circularEma(emaAz_, filtAz, alpha);
-        emaInc_ = alpha * filtInc + (1.0f - alpha) * emaInc_;
+        float azErr  = circularDiff(emaAz_, filtAz);
+        float incErr = fabsf(emaInc_ - filtInc);
+        if (azErr > jumpThreshold_ || incErr > jumpThreshold_) {
+            // Large discontinuity — snap to new value immediately
+            emaAz_  = filtAz;
+            emaInc_ = filtInc;
+            resetStability();
+        } else {
+            emaAz_  = circularEma(emaAz_, filtAz, alpha);
+            emaInc_ = alpha * filtInc + (1.0f - alpha) * emaInc_;
+        }
     }
 
-    // 4) Push into stability ring buffer
-    pushStability(emaAz_, emaInc_);
+    // 4) Push into stability ring buffer (decimated to stabIntervalMs_)
+    uint32_t now = millis();
+    if ((now - lastStabPushMs_) >= stabIntervalMs_) {
+        pushStability(emaAz_, emaInc_);
+        lastStabPushMs_ = now;
+    }
 }
 
 // ── Circular EMA for azimuth ────────────────────────────────────────
@@ -100,6 +117,7 @@ bool SensorManager::isStable(float tolerance) const {
 void SensorManager::resetStability() {
     stabHead_  = 0;
     stabCount_ = 0;
+    lastStabPushMs_ = millis();
 }
 
 // ── Median pre-filter ──────────────────────────────────────────────

@@ -17,6 +17,13 @@
 #include "config_manager.h"
 #include "mag_cal/calibration.h"
 
+/// Which calibration workflow to run
+enum class CalMode : uint8_t {
+    PART1_ELLIPSOID,   // 56-pt ellipsoid only → results → save
+    PART2_ALIGNMENT,   // 24-pt alignment only (requires existing ellipsoid cal)
+    SHORT,             // 24-pt short cal (ellipsoid + alignment on same data)
+};
+
 /// Calibration state machine states
 enum class CalibState : uint8_t {
     INACTIVE,               // not in calibration mode
@@ -42,11 +49,10 @@ enum class CalibState : uint8_t {
 class CalibrationMode {
 public:
     /// Initialize with references to all required peripherals.
-    /// shortCal=true skips directly to alignment-only collection (24 points).
     void begin(ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
                LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
                ConfigManager& cfgMgr, MagCal::Calibration& cal,
-               const Config& config, bool shortCal = false);
+               const Config& config, CalMode mode = CalMode::PART1_ELLIPSOID);
 
     /// Enter foresight/backsight field check mode.
     /// Requires an existing calibration. Collects F/B pairs to correct residual
@@ -119,7 +125,7 @@ private:
     static constexpr float HOLD_TIME = 0.5f;  // seconds to hold for save/discard
 
     // ── Calibration mode ──
-    bool isShortCal_ = false;
+    CalMode calMode_ = CalMode::PART1_ELLIPSOID;
 
     // ── Results ──
     float resultMagAcc_  = 0.0f;

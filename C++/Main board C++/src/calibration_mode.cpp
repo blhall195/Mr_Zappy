@@ -7,7 +7,7 @@ void CalibrationMode::begin(
     ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
     LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
     ConfigManager& cfgMgr, MagCal::Calibration& cal,
-    const Config& config, bool shortCal)
+    const Config& config, CalMode mode)
 {
     btns_      = &btns;
     disp_      = &disp;
@@ -51,16 +51,20 @@ void CalibrationMode::begin(
     // Turn on laser for calibration
     laser_->setLaser(true);
 
-    isShortCal_ = shortCal;
+    calMode_ = mode;
 
-    if (shortCal) {
-        Serial.println(F("Calibration mode: Short Calibration"));
+    if (mode == CalMode::PART1_ELLIPSOID) {
+        Serial.println(F("Calibration mode: Part 1 (Ellipsoid)"));
+        state_ = CalibState::INTRO_ELLIPSOID;
+        showEllipsoidIntro();
+    } else if (mode == CalMode::PART2_ALIGNMENT) {
+        Serial.println(F("Calibration mode: Part 2 (Alignment)"));
         state_ = CalibState::INTRO_ALIGNMENT;
         showAlignmentIntro();
     } else {
-        Serial.println(F("Calibration mode: Long Calibration"));
-        state_ = CalibState::INTRO_ELLIPSOID;
-        showEllipsoidIntro();
+        Serial.println(F("Calibration mode: Short Calibration"));
+        state_ = CalibState::INTRO_ALIGNMENT;
+        showAlignmentIntro();
     }
 }
 
@@ -277,10 +281,10 @@ void CalibrationMode::updateCalculatingEllipsoid() {
 
     calculateEllipsoid();
 
-    // Transition to alignment phase
-    Serial.println(F("Ellipsoid done. Moving to alignment phase."));
-    state_ = CalibState::INTRO_ALIGNMENT;
-    showAlignmentIntro();
+    // Part 1 ends here — show results and allow save
+    Serial.println(F("Ellipsoid fit complete."));
+    state_ = CalibState::SHOW_RESULTS;
+    showResultsScreen();
 }
 
 // ── State: CALCULATING_ALIGNMENT ────────────────────────────────────
@@ -375,7 +379,41 @@ void CalibrationMode::updateSaving() {
         d.display();
         delay(1500);
     }
-    state_ = CalibState::DONE;
+    // After Part 1 save, automatically transition into Part 2 (alignment)
+    if (calMode_ == CalMode::PART1_ELLIPSOID) {
+        Serial.println(F("Part 1 complete — starting Part 2 (Alignment)"));
+        calMode_ = CalMode::PART2_ALIGNMENT;
+        magArray_.clear();
+        gravArray_.clear();
+        bufferCount_ = 0;
+        bufferIdx_ = 0;
+        emaInitialized_ = false;
+        waitingForStable_ = false;
+        settleStart_ = 0;
+        accumMag_ = Eigen::Vector3f::Zero();
+        accumGrav_ = Eigen::Vector3f::Zero();
+        accumCount_ = 0;
+        iteration_ = 0;
+        holdCounter_ = 0.0f;
+        resultMagAcc_ = 0.0f;
+        resultGravAcc_ = 0.0f;
+        resultAccuracy_ = 0.0f;
+        state_ = CalibState::INTRO_ALIGNMENT;
+        showAlignmentIntro();
+        return;
+    }
+
+    // Final save complete — reboot to cleanly load new calibration
+    auto& d2 = disp_->getDisplay();
+    d2.clearDisplay();
+    d2.setTextColor(SH110X_WHITE);
+    d2.setTextSize(2);
+    d2.setCursor(0, 50);
+    d2.print(F("Restarting..."));
+    d2.display();
+    Serial.println(F("Rebooting to apply new calibration..."));
+    delay(2000);
+    NVIC_SystemReset();
 }
 
 // ── Sensor reading ──────────────────────────────────────────────────
@@ -486,7 +524,7 @@ void CalibrationMode::acceptPoint(const Eigen::Vector3f& mag, const Eigen::Vecto
         Serial.println(F("Collection complete. Calculating..."));
         if (state_ == CalibState::COLLECTING_ELLIPSOID) {
             state_ = CalibState::CALCULATING_ELLIPSOID;
-        } else if (isShortCal_) {
+        } else if (calMode_ == CalMode::SHORT) {
             state_ = CalibState::CALCULATING_SHORT;
         } else {
             state_ = CalibState::CALCULATING_ALIGNMENT;
@@ -533,7 +571,11 @@ void CalibrationMode::showAlignmentIntro() {
     d.setTextSize(2);
     d.setCursor(0, 0);
     d.println(F("Calibrate"));
-    d.println(F("short mode"));
+    if (calMode_ == CalMode::PART2_ALIGNMENT) {
+        d.println(F("Part 2"));
+    } else {
+        d.println(F("short mode"));
+    }
 
     // Instructions
     d.setTextSize(1);
@@ -667,26 +709,41 @@ void CalibrationMode::showResultsScreen() {
     d.println(F("Results"));
 
     char buf[24];
-
-    // Show both ellipsoid uniformity and alignment accuracy
     d.setTextSize(1);
-    d.setCursor(0, 28);
-    snprintf(buf, sizeof(buf), "Mag:  %.5f", (double)resultMagAcc_);
-    d.println(buf);
-    d.setCursor(0, 40);
-    snprintf(buf, sizeof(buf), "Grav: %.5f", (double)resultGravAcc_);
-    d.println(buf);
-    d.setCursor(0, 52);
-    snprintf(buf, sizeof(buf), "Acc:  %.3f deg", (double)resultAccuracy_);
-    d.println(buf);
 
-    Serial.print(F("Results — Mag: "));
-    Serial.print(resultMagAcc_, 4);
-    Serial.print(F("  Grav: "));
-    Serial.print(resultGravAcc_, 4);
-    Serial.print(F("  Accuracy: "));
-    Serial.print(resultAccuracy_, 3);
-    Serial.println(F(" deg"));
+    if (calMode_ == CalMode::PART1_ELLIPSOID) {
+        // Ellipsoid-only results: uniformity metrics
+        d.setCursor(0, 28);
+        snprintf(buf, sizeof(buf), "Mag:  %.5f", (double)resultMagAcc_);
+        d.println(buf);
+        d.setCursor(0, 40);
+        snprintf(buf, sizeof(buf), "Grav: %.5f", (double)resultGravAcc_);
+        d.println(buf);
+
+        Serial.print(F("Results — Mag: "));
+        Serial.print(resultMagAcc_, 4);
+        Serial.print(F("  Grav: "));
+        Serial.println(resultGravAcc_, 4);
+    } else {
+        // Alignment / short cal results: all three metrics
+        d.setCursor(0, 28);
+        snprintf(buf, sizeof(buf), "Mag:  %.5f", (double)resultMagAcc_);
+        d.println(buf);
+        d.setCursor(0, 40);
+        snprintf(buf, sizeof(buf), "Grav: %.5f", (double)resultGravAcc_);
+        d.println(buf);
+        d.setCursor(0, 52);
+        snprintf(buf, sizeof(buf), "Acc:  %.3f deg", (double)resultAccuracy_);
+        d.println(buf);
+
+        Serial.print(F("Results — Mag: "));
+        Serial.print(resultMagAcc_, 4);
+        Serial.print(F("  Grav: "));
+        Serial.print(resultGravAcc_, 4);
+        Serial.print(F("  Accuracy: "));
+        Serial.print(resultAccuracy_, 3);
+        Serial.println(F(" deg"));
+    }
 
     // Save/discard instructions
     d.setCursor(0, 72);
@@ -1179,7 +1236,18 @@ void CalibrationMode::updateFBSaving() {
         d.display();
         delay(1500);
     }
-    state_ = CalibState::DONE;
+
+    // Reboot to cleanly load corrected calibration
+    auto& d2 = disp_->getDisplay();
+    d2.clearDisplay();
+    d2.setTextColor(SH110X_WHITE);
+    d2.setTextSize(2);
+    d2.setCursor(0, 50);
+    d2.print(F("Restarting..."));
+    d2.display();
+    Serial.println(F("Rebooting to apply corrected calibration..."));
+    delay(2000);
+    NVIC_SystemReset();
 }
 
 // ── F/B Check: Display helpers ──────────────────────────────────
@@ -1414,21 +1482,22 @@ bool CalibrationMode::saveCalibration() {
 
     // Save JSON to flash (human-readable backup)
     bool jsonOk = cfgMgr_->saveCalibrationJson(jsonBuf, len);
+    Serial.print(F("  JSON save: "));
+    Serial.println(jsonOk ? F("OK") : F("FAILED"));
+    Serial.print(F("  JSON size: "));
+    Serial.print(len);
+    Serial.println(F(" bytes"));
 
     // Save binary to flash (fast boot path)
     MagCal::CalibrationBinary bin;
     cal_->toBinary(bin);
     bool binOk = cfgMgr_->saveCalibrationBinary(bin);
-
-    if (binOk) {
-        Serial.println(F("  Binary calibration saved"));
-    } else {
-        Serial.println(F("  Binary calibration save FAILED"));
-    }
+    Serial.print(F("  Binary save: "));
+    Serial.println(binOk ? F("OK") : F("FAILED"));
 
     // Save quality metrics for "View Last Cal" menu
     ConfigManager::CalMetrics metrics = {resultMagAcc_, resultGravAcc_, resultAccuracy_};
     cfgMgr_->saveCalMetrics(metrics);
 
-    return jsonOk;
+    return jsonOk && binOk;
 }

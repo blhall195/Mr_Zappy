@@ -9,11 +9,13 @@ public:
     /// Initialise with calibration reference and tuning parameters
     void init(const MagCal::Calibration* cal,
               float emaAlphaStable, float emaAlphaMoving,
-              uint8_t stabilityLen);
+              uint8_t stabilityLen, float jumpThreshold = 8.0f);
 
-    /// Feed raw sensor readings; updates angles and EMA
+    /// Feed raw sensor readings; updates angles and EMA.
+    /// gyroMoving: true if gyro magnitude exceeds the freeze threshold (use fast alpha).
     void update(const Eigen::Vector3f& rawMag,
-                const Eigen::Vector3f& rawAccel);
+                const Eigen::Vector3f& rawAccel,
+                bool gyroMoving);
 
     // ── Filtered angles (from calibration + EMA) ─────────────────────
     float getAzimuth()     const { return emaAz_; }      // [0, 360)
@@ -34,18 +36,21 @@ private:
     float roll_   = 0.0f;
     float emaAlphaStable_ = 0.05f;
     float emaAlphaMoving_ = 0.3f;
+    float jumpThreshold_ = 8.0f;
     bool emaSeeded_ = false;
 
-    // Stability ring buffer
+    // Stability ring buffer (decimated — pushes only every stabIntervalMs_)
     static constexpr uint8_t MAX_STAB_BUF = 8;
     float azBuf_[MAX_STAB_BUF]  = {};
     float incBuf_[MAX_STAB_BUF] = {};
     uint8_t stabHead_  = 0;
     uint8_t stabCount_ = 0;
     uint8_t stabLen_   = 3;
+    uint32_t stabIntervalMs_ = 50;    // ms between stability samples
+    uint32_t lastStabPushMs_ = 0;
 
-    // Median pre-filter (5-sample, kills up to 2 consecutive spikes)
-    static constexpr uint8_t MEDIAN_LEN = 5;
+    // Median pre-filter (3-sample, kills single-sample spikes)
+    static constexpr uint8_t MEDIAN_LEN = 3;
     float medAzBuf_[MEDIAN_LEN]  = {};
     float medIncBuf_[MEDIAN_LEN] = {};
     uint8_t medHead_  = 0;

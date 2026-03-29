@@ -10,7 +10,8 @@
 enum class MenuExitAction : uint8_t {
     NONE,               // still active or not yet used
     RETURN_NORMAL,      // go back to normal operation
-    ENTER_LONG_CALIB,   // enter long calibration mode
+    ENTER_PART1_CALIB,  // enter Part 1 calibration (ellipsoid, 56 pts)
+    ENTER_PART2_CALIB,  // enter Part 2 calibration (alignment, 24 pts)
     ENTER_SHORT_CALIB,  // enter short calibration mode
     ENTER_SNAKE,        // launch snake game
     ENTER_FB_CHECK,     // enter foresight/backsight field check
@@ -40,6 +41,7 @@ private:
     // Menu hierarchy (statically allocated, rebuilt on setting changes)
     FruityMenu _root;
     FruityMenu _calSub;
+    FruityMenu _longCalSub;
     FruityMenu _anomalySub;
     FruityMenu _deleteSub;
     FruityMenu _laserSub;
@@ -70,7 +72,8 @@ private:
     // Callbacks (static free functions, access state via s_instance)
     static void goToRoot(int);
     static void goToSettings(int);
-    static void enterLongCalibration(int);
+    static void enterPart1Calibration(int);
+    static void enterPart2Calibration(int);
     static void enterShortCalibration(int);
     static void setAnomalyOn(int);
     static void setAnomalyOff(int);

@@ -487,14 +487,19 @@ void loop() {
     }
 
     // ── Handle menu exit transitions (one-shot) ──
-    if (menuMgr.exitAction() == MenuExitAction::ENTER_LONG_CALIB ||
+    if (menuMgr.exitAction() == MenuExitAction::ENTER_PART1_CALIB ||
+        menuMgr.exitAction() == MenuExitAction::ENTER_PART2_CALIB ||
         menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB) {
-        bool shortCal = (menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB);
+        CalMode cm = CalMode::PART1_ELLIPSOID;
+        if (menuMgr.exitAction() == MenuExitAction::ENTER_PART2_CALIB)
+            cm = CalMode::PART2_ALIGNMENT;
+        else if (menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB)
+            cm = CalMode::SHORT;
         menuMgr.clearExitAction();
         if (magOk && imuOk && dispOk && laserOk) {
             Serial.println(F("Transitioning: menu → calibration"));
             calMode.begin(buttons, display, disco, laser, mag, imu,
-                          configMgr, calibration, ctx.config, shortCal);
+                          configMgr, calibration, ctx.config, cm);
         } else {
             Serial.println(F("Cannot enter calibration — sensors not ready"));
             display.initScreen();
@@ -604,11 +609,20 @@ void loop() {
                 buttons.update();
                 delay(Timing::LOOP_INTERVAL_MS);
             }
+            // Consume any residual edge flags so the next loop doesn't
+            // see a stale wasPressed and trigger an unwanted measurement.
+            buttons.update();
+            buttons.wasPressed(Button::MEASURE);
+            buttons.wasPressed(Button::DISCO);
+            buttons.wasPressed(Button::CALIB);
+            buttons.wasPressed(Button::FIRE);
+            buttons.wasPressed(Button::SHUTDOWN);
             calOk = calibration.isCalibrated();
             if (calOk) {
                 sensorMgr.init(&calibration, ctx.config.emaAlphaStable,
                                ctx.config.emaAlphaMoving,
-                               ctx.config.stabilityBufferLength);
+                               ctx.config.stabilityBufferLength,
+                               Defaults::emaJumpThreshold);
             }
             display.initScreen();
             if (laserOk) {
@@ -677,7 +691,8 @@ static void readSensorsUpdate(uint32_t now) {
     if (calOk && magOk && imuOk) {
         Eigen::Vector3f rawMag(lastMagX, lastMagY, lastMagZ);
         Eigen::Vector3f rawGrav(lastAccX, lastAccY, lastAccZ);
-        sensorMgr.update(rawMag, rawGrav);
+        float _gyroMag = sqrtf(lastGyroX*lastGyroX + lastGyroY*lastGyroY + lastGyroZ*lastGyroZ);
+        sensorMgr.update(rawMag, rawGrav, _gyroMag > Defaults::gyroMovingThreshold);
 
         // Boot-time sanity check: after EMA settles, verify field strength
         if (!fieldCheckDone && ++fieldCheckCounter >= FIELD_CHECK_AFTER_SAMPLES) {
@@ -784,7 +799,7 @@ static void pollButtons(uint32_t now) {
             }
         }
     } else {
-        // Released — short press acts same as MEASURE (no quickShot)
+        // Released — short press = splay shot (quickShot: wider stability, skip leg check)
         if (discoHolding && !discoTriggered) {
             ctx.purpleLatched = false;
 
@@ -794,20 +809,22 @@ static void pollButtons(uint32_t now) {
                 ctx.laserEnabled = true;
                 lastDistance = 0;
                 disco.turnOff();
-                Serial.println(F("DISCO: unfreezing after leg, live readings"));
+                Serial.println(F("SPLAY: unfreezing after leg, live readings"));
             } else if (ctx.displayFrozen && ctx.laserEnabled) {
                 ctx.displayFrozen = false;
+                ctx.quickShot = true;
                 ctx.currentState = SystemState::TAKING_MEASUREMENT;
                 ctx.measurementTaken = false;
                 measRedLedSet = false;
                 lastDistance = 0;
-                Serial.println(F("DISCO: taking measurement (from frozen)"));
+                Serial.println(F("SPLAY: taking measurement (from frozen)"));
             } else if (ctx.laserEnabled) {
+                ctx.quickShot = true;
                 ctx.currentState = SystemState::TAKING_MEASUREMENT;
                 ctx.measurementTaken = false;
                 measRedLedSet = false;
                 lastDistance = 0;
-                Serial.println(F("DISCO: taking measurement"));
+                Serial.println(F("SPLAY: taking measurement"));
             } else if (ctx.currentState == SystemState::IDLE) {
                 if (laserOk) {
                     laser.setBuzzer(true);
@@ -819,9 +836,9 @@ static void pollButtons(uint32_t now) {
                 }
                 ctx.laserEnabled = true;
                 lastDistance = 0;
-                Serial.println(F("DISCO: laser re-enabled"));
+                Serial.println(F("SPLAY: laser re-enabled"));
             } else {
-                Serial.println(F("DISCO: system busy, ignored"));
+                Serial.println(F("SPLAY: system busy, ignored"));
                 ctx.currentState = SystemState::IDLE;
             }
         }
@@ -1472,6 +1489,10 @@ static void updateDisplay(uint32_t now) {
         }
 
         display.updateSensorReadings(lastDistance, dispAz, dispInc);
+
+        // Teleplot output
+        Serial.print(F(">azimuth:")); Serial.println(dispAz, 1);
+        Serial.print(F(">inclination:")); Serial.println(dispInc, 1);
     }
 
     display.updateBattery(lastBatPct);
@@ -1678,20 +1699,30 @@ static void initCalibration() {
             if (loaded) {
                 calFromFlash = true;
                 Serial.println(F("OK (from binary)"));
+            } else {
+                Serial.println(F("binary file found but CRC/parse failed"));
             }
+        } else {
+            Serial.println(F("no binary file on flash"));
         }
     }
 
     // 2. Fall back to JSON from flash
     if (!loaded && flashOk) {
-        char calBuf[1024];
+        char calBuf[2048];
         size_t calLen = 0;
         if (configMgr.loadCalibrationJson(calBuf, sizeof(calBuf), calLen)) {
             loaded = calibration.fromJson(calBuf, calLen);
             if (loaded) {
                 calFromFlash = true;
                 Serial.println(F("OK (from flash JSON)"));
+            } else {
+                Serial.print(F("JSON parse failed ("));
+                Serial.print(calLen);
+                Serial.println(F(" bytes)"));
             }
+        } else {
+            Serial.println(F("no JSON file or too large for buffer"));
         }
     }
 
