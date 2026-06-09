@@ -29,7 +29,8 @@
       "Bash(\"C:/Users/Brendans-PC/.platformio/penv/Scripts/pio.exe\" run --target upload)",
       "Bash(~/.platformio/penv/Scripts/platformio run)",
       "Bash(~/.platformio/penv/Scripts/platformio run --target upload)",
-      "Bash(ls -d */)"
+      "Bash(ls -d */)",
+      "Bash(git pull:*)"
     ]
   }
 }

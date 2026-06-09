@@ -3,7 +3,18 @@
     "allow": [
       "Bash(~/.platformio/penv/Scripts/platformio.exe run:*)",
       "Bash(~/.platformio/penv/Scripts/platformio.exe device monitor:*)",
-      "Bash(~/.platformio/penv/Scripts/platformio.exe device list:*)"
+      "Bash(~/.platformio/penv/Scripts/platformio.exe device list:*)",
+      "Bash(platformio run:*)",
+      "Bash(powershell.exe -Command \"Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Caption\")",
+      "Bash(powershell.exe -Command \"Get-PnpDevice -Class Ports -Status OK | Select-Object InstanceId, FriendlyName\")",
+      "Bash(pio device *)",
+      "PowerShell(Get-WmiObject Win32_PnPEntity | Where-Object {$_.Caption -match \"COM\\\\d\"} | Select-Object -ExpandProperty Caption)",
+      "Bash(pio run *)",
+      "Bash(ls \"c:/Users/Brendans-PC/Desktop/Mr_Zappy/C++/DiscoX C++ BLE/.pio/build\" 2>/dev/null && echo \"---\" && ls \"c:/Users/Brendans-PC/Desktop/Mr_Zappy/C++/Main board C++/firmware.uf2\")",
+      "Read(//c/Users/Brendans-PC/Desktop/Mr_Zappy/C++/Main board C++/**)",
+      "Read(//c/Users/Brendans-PC/.platformio/**)",
+      "Read(//c/Users/Brendans-PC/.platformio/packages/**)",
+      "Bash(python __TRACKED_VAR__/.platformio/packages/framework-arduinoadafruitnrf52/tools/uf2conv/uf2conv.py .pio/build/adafruit_itsybitsy_nrf52840/firmware.hex -c -f 0xADA52840 -o firmware.uf2)"
     ]
   }
 }
