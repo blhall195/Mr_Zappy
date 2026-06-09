@@ -91,6 +91,10 @@ void DisplayManager::updateBTNumber(uint16_t pending) {
     _btPending = pending;
 }
 
+void DisplayManager::updateMeasureFrom(bool front) {
+    _measureFromFront = front;
+}
+
 void DisplayManager::blankScreen() {
     if (!_initialized) return;
     _display.clearDisplay();
@@ -263,8 +267,17 @@ void DisplayManager::drawMainScreen() {
 
     // ── BT pending count ────────────────────────────────────────
     if (_btPending > 0) {
-        _display.setCursor(BT_NUM_X, BT_Y);
+        _display.setCursor(_btConnected ? BT_NUM_X : BT_X, BT_Y);
         _display.print(_btPending);
+    }
+
+    // ── Measure-from indicator (top-centre, size 2) ─────────────
+    // "FR" only shown when measuring from front; blank = default back
+    if (_measureFromFront) {
+        _display.setTextSize(1);
+        _display.setCursor((128 - 30) / 2, BT_Y + 4);
+        _display.print(F("Front"));
+        _display.setTextSize(2);
     }
 
     // ── Battery bar (top-right) ─────────────────────────────────

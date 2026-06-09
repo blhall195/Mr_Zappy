@@ -54,7 +54,7 @@ namespace Defaults {
     constexpr float    magTolerance          = 10.0f;   // degrees
     constexpr float    gravTolerance         = 10.0f;   // degrees
     constexpr float    dipTolerance          = 10.0f;   // degrees
-    constexpr bool     anomalyDetection      = false;
+    constexpr bool     anomalyDetection      = true;
     constexpr float    stabilityTolerance    = 0.5f;    // degrees
     constexpr uint8_t  stabilityBufferLength = 5;
     constexpr float    emaAlphaStable        = 0.05f;   // low alpha when stationary (max smoothing)
@@ -62,7 +62,8 @@ namespace Defaults {
     constexpr float    emaJumpThreshold      = 8.0f;    // degrees — snap EMA when error exceeds this
     constexpr float    legAngleTolerance     = 1.7f;    // degrees
     constexpr float    legDistanceTolerance  = 0.05f;   // meters
-    constexpr float    laserDistanceOffset   = 0.162f;  // meters (device length)
+    constexpr float    laserDistanceOffset   = 0.162f;  // meters added when measuring from back
+    constexpr float    laserFrontOffset      = 0.03f;   // meters subtracted when measuring from front
     constexpr float    quickShotStabilityTol = 3.0f;    // degrees (wider for splay shots)
     constexpr float    gyroFreezeThreshold   = 0.02f;   // rad/s — below this gyro magnitude, display freezes
     constexpr float    gyroMovingThreshold   = 0.05f;   // rad/s — above this, EMA uses fast alpha (hand tremor ~0.03-0.05)
@@ -72,10 +73,11 @@ namespace Defaults {
     constexpr uint8_t  calBufferLength       = 5;      // samples for calibration consistency window
     constexpr uint16_t calSettleMs           = 250;    // ms device must stay stable before accepting
     constexpr float    calEmaAlpha           = 0.3f;   // EMA pre-filter (lower = smoother, 0.3 = ~3 sample lag)
-    constexpr uint16_t calTimeoutMs          = 3000;   // ms max wait for stability before forcing acceptance
+    constexpr uint16_t calTimeoutMs          = 4000;   // ms max wait for stability before forcing acceptance
     constexpr uint32_t autoShutdownTimeout   = 1800;    // seconds (30 min)
     constexpr uint32_t laserTimeout          = 120;     // seconds (2 min)
     constexpr bool     laserWibble            = true;    // blink laser on leg detect
+    constexpr bool     measureFromFront      = false;   // false = Back (add offset), true = Front (raw laser)
     constexpr uint8_t  screenBrightness      = 255;     // OLED contrast 0-255
     constexpr char     bleName[]             = "SAP6_Unicorn";
     constexpr uint8_t  bleNameMaxLen         = 20;      // max chars for BLE name

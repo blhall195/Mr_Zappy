@@ -43,6 +43,7 @@ enum class CalibState : uint8_t {
     FB_CALCULATING,         // F/B check: running sinusoidal fit
     FB_RESULTS,             // F/B check: showing residual amplitude, save/discard
     FB_SAVING,              // F/B check: saving corrected calibration
+    SHUTDOWN_CONFIRM,       // power-off confirmation screen (press again to confirm)
     DONE                    // finished, caller should exit calibration mode
 };
 
@@ -65,6 +66,10 @@ public:
     /// Call every loop iteration. Returns true when calibration is complete.
     bool update();
 
+    /// Called by main loop when the power button is pressed during calibration.
+    /// First call shows the confirmation screen; second call executes shutdown.
+    void requestShutdown();
+
     bool isActive() const { return state_ != CalibState::INACTIVE && state_ != CalibState::DONE; }
     CalibState state() const { return state_; }
 
@@ -80,7 +85,10 @@ private:
     MagCal::Calibration* cal_      = nullptr;
 
     // ── State machine ──
-    CalibState state_ = CalibState::INACTIVE;
+    CalibState state_            = CalibState::INACTIVE;
+    CalibState preShutdownState_ = CalibState::INACTIVE;  // state to restore on cancel
+    uint32_t   shutdownHoldStart_   = 0;  // millis() when SHUTDOWN hold began (0 = not held)
+    uint32_t   shutdownLastDisplayMs_ = 0;
 
     // ── Data collection ──
     std::vector<Eigen::Vector3f> magArray_;
@@ -193,6 +201,7 @@ private:
     void updateFBCalculating();
     void updateFBResults();
     void updateFBSaving();
+    void updateShutdownConfirm();
 
     // ── Helpers ──
     void readSensors(Eigen::Vector3f& mag, Eigen::Vector3f& grav);
@@ -218,6 +227,8 @@ private:
     void showFBLiveScreen();
     void showFBPairResult(float error, float bearing);
     void showFBResultsScreen();
+    void showShutdownConfirmScreen(uint8_t holdPct = 0);
+    void redrawScreen(CalibState s);
 
     // ── Beep control ──
     void beep();

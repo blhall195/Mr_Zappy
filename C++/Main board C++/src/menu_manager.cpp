@@ -112,6 +112,9 @@ void MenuManager::buildMenu() {
     uint8_t bpct = (uint8_t)((uint16_t)_ctx->config.screenBrightness * 100 / 255);
     snprintf(_brightnessLabel, sizeof(_brightnessLabel), "Brightness: %u%%", bpct);
 
+    snprintf(_measureFromLabel, sizeof(_measureFromLabel), "Measure from: %s",
+             _ctx->config.measureFromFront ? "Front" : "Back");
+
     // ── Initialize all menus ─────────────────────────────────────
     _root.init(*_display, "Main Menu");
     _calSub.init(*_display, "Enter Calibration");
@@ -122,10 +125,13 @@ void MenuManager::buildMenu() {
     _brightnessSub.init(*_display, _brightnessLabel);
     _settingsSub.init(*_display, "Settings");
     _firmwareSub.init(*_display, "Update Firmware");
+    _measureFromSub.init(*_display, _measureFromLabel);
+    _reformatSub.init(*_display, "Reformat (via USB)");
 
     // ── Root menu items ────────────────────────────────
     _root.addAction("Exit", exitMenu);
     _root.addSubmenu("Enter Calibration", &_calSub);
+    _root.addSubmenu(_measureFromLabel, &_measureFromSub);
     _root.addSubmenu("Settings", &_settingsSub);
     _root.addAction("Play Snake", enterSnakeGame);
     _root.addSubmenu("Update Firmware", &_firmwareSub);
@@ -186,13 +192,24 @@ void MenuManager::buildMenu() {
     _firmwareSub.addAction("Yes", enterBootloader);
     _firmwareSub.addAction("<- Back", goToRoot);
 
+    // ── Measure From submenu ─────────────────────────────────────────
+    _measureFromSub.addAction("Back (add length)", setMeasureFromBack);
+    _measureFromSub.addAction("Front (raw laser)", setMeasureFromFront);
+    _measureFromSub.addAction("<- Back", goToRoot);
+
     // ── Settings submenu ───────────────────────────────────────────────
     _settingsSub.addSubmenu(_laserLabel, &_laserSub);
     _settingsSub.addSubmenu(_anomalyLabel, &_anomalySub);
     _settingsSub.addSubmenu(_shutdownLabel, &_shutdownSub);
     _settingsSub.addSubmenu(_brightnessLabel, &_brightnessSub);
     _settingsSub.addAction("Edit Settings File", enterUsbDrive);
+    _settingsSub.addSubmenu("Reformat (via USB)", &_reformatSub);
     _settingsSub.addAction("<- Back", goToRoot);
+
+    // ── Reformat submenu (recovery — opens USB mode to format on a PC) ──
+    _reformatSub.addAction("No", goToSettings);
+    _reformatSub.addAction("Yes - USB format", reformatFlash);
+    _reformatSub.addAction("<- Back", goToSettings);
 }
 
 // ── Static callbacks ─────────────────────────────────────────────────
@@ -285,6 +302,13 @@ void MenuManager::enterUsbDrive(int) {
     s_instance->_exitAction = MenuExitAction::ENTER_USB_DRIVE;
 }
 
+void MenuManager::reformatFlash(int) {
+    if (!s_instance) return;
+    Serial.println(F("Menu: reformatting flash (erase all)"));
+    s_instance->_active = false;
+    s_instance->_exitAction = MenuExitAction::REFORMAT_FLASH;
+}
+
 void MenuManager::setScreenBrightness(int value) {
     if (!s_instance) return;
     s_instance->_ctx->config.screenBrightness = (uint8_t)value;
@@ -350,6 +374,22 @@ void MenuManager::enterSnakeGame(int) {
     Serial.println(F("Menu: launching snake game"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_SNAKE;
+}
+
+void MenuManager::setMeasureFromFront(int) {
+    if (!s_instance) return;
+    s_instance->_ctx->config.measureFromFront = true;
+    s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
+    Serial.println(F("Menu: measure from Front (raw laser distance)"));
+    s_instance->buildMenu();
+}
+
+void MenuManager::setMeasureFromBack(int) {
+    if (!s_instance) return;
+    s_instance->_ctx->config.measureFromFront = false;
+    s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
+    Serial.println(F("Menu: measure from Back (add device length offset)"));
+    s_instance->buildMenu();
 }
 
 void MenuManager::exitMenu(int) {

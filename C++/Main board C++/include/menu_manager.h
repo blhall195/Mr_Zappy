@@ -17,6 +17,7 @@ enum class MenuExitAction : uint8_t {
     ENTER_FB_CHECK,     // enter foresight/backsight field check
     ENTER_BOOTLOADER,   // reboot into UF2 bootloader for firmware update
     ENTER_USB_DRIVE,    // reboot into USB mass storage mode for settings
+    REFORMAT_FLASH,     // erase + reformat QSPI flash (recovery), then reboot
 };
 
 class MenuManager {
@@ -49,12 +50,15 @@ private:
     FruityMenu _settingsSub;
     FruityMenu _brightnessSub;
     FruityMenu _firmwareSub;
+    FruityMenu _measureFromSub;
+    FruityMenu _reformatSub;
 
     // Dynamic label buffers (updated in buildMenu)
     char _anomalyLabel[24];
     char _laserLabel[24];
     char _shutdownLabel[24];
     char _brightnessLabel[24];
+    char _measureFromLabel[24];
 
     // State
     Adafruit_SH1107* _display  = nullptr;
@@ -85,6 +89,9 @@ private:
     static void enterSnakeGame(int);
     static void enterBootloader(int);
     static void enterUsbDrive(int);
+    static void reformatFlash(int);
     static void setScreenBrightness(int value);
+    static void setMeasureFromFront(int);
+    static void setMeasureFromBack(int);
     static void exitMenu(int);
 };

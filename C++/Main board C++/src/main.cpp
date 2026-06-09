@@ -152,6 +152,10 @@ static bool measRedLedSet = false;
 // ── BLE state ───────────────────────────────────────────────────────
 static bool lastBleConnected = false;
 
+// ── Shutdown interrupt flag ─────────────────────────────────────────
+static volatile bool shutdownRequested = false;
+static void onShutdownINT() { shutdownRequested = true; }
+
 // ── Forward declarations — init ────────────────────────────────────
 static void initPins();
 static void scanI2C();
@@ -217,19 +221,25 @@ void setup() {
     Wire.setClock(400000);
     initDisplay();
 
-    // Configure button pull-up BEFORE reading it
+    // Configure button pull-ups BEFORE reading them
     pinMode(PIN_BTN_MEASURE, INPUT_PULLUP);
+    pinMode(PIN_BTN_FIRE,    INPUT_PULLUP);
+    delayMicroseconds(50);  // let pull-ups settle before reading
 
     // ── Early USB drive mode check ─────────────────────────────────
     // Must happen BEFORE Serial.begin() so MSC is part of the initial
     // USB enumeration — otherwise the host won't see the mass storage
     // device without a cable replug.
-    // Check for usb_drive flag BEFORE showing splash so the user sees
-    // "Entering USB mode..." instead of the normal splash screen.
+    // Entered by EITHER the usb_drive flag (set from the menu) OR by
+    // holding the FIRE button at power-on. The button path needs no flash
+    // write, so it still works when the filesystem is full/unwritable —
+    // this is the recovery route to let a host PC reformat the drive.
     {
-        bool earlyFlash = configMgr.begin();  // safe before Serial — prints are no-ops
-        if (earlyFlash && configMgr.hasFlag("usb_drive")) {
-            configMgr.clearFlag("usb_drive");
+        bool earlyFlash  = configMgr.begin();  // safe before Serial — prints are no-ops
+        bool usbByFlag   = earlyFlash && configMgr.hasFlag("usb_drive");
+        bool usbByButton = (digitalRead(PIN_BTN_FIRE) == LOW);
+        if (usbByFlag || usbByButton) {
+            if (usbByFlag) configMgr.clearFlag("usb_drive");
 
             // Show transitional message while USB stack initialises
             if (dispOk) {
@@ -261,16 +271,16 @@ void setup() {
                 d.clearDisplay();
                 d.setTextSize(1);
                 d.setTextColor(SH110X_WHITE);
-                d.setCursor(0, 10);
+                d.setCursor(0, 4);
                 d.println(F("USB Drive Mode"));
                 d.println();
-                d.println(F("Unplug & replug USB"));
-                d.println(F("to see the drive."));
+                d.println(F("Replug USB to see"));
+                d.println(F("the drive."));
                 d.println();
-                d.println(F("Edit config.json,"));
-                d.println(F("eject drive, then"));
-                d.println(F("hold power button"));
-                d.println(F("to restart."));
+                d.println(F("Edit config, or to"));
+                d.println(F("recover: Format as"));
+                d.println(F("FAT. Then eject &"));
+                d.println(F("power-cycle."));
                 d.display();
             }
 
@@ -380,6 +390,7 @@ void setup() {
     // ── Switch display from splash to main screen ────────────────
     if (dispOk) {
         display.updateBattery(lastBatPct);
+        display.updateMeasureFrom(ctx.config.measureFromFront);
         display.initScreen();
     }
 
@@ -459,6 +470,18 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════
 void loop() {
     uint32_t now = millis();
+
+    // Check LTC2954 INT interrupt — works in all modes (normal, menu, cal, snake)
+    if (shutdownRequested) {
+        shutdownRequested = false;
+        if (calMode.isActive()) {
+            // During calibration: route through confirmation screen
+            calMode.requestShutdown();
+        } else {
+            Serial.println(F("SHUTDOWN: INT received, powering off"));
+            doShutdown();
+        }
+    }
 
     buttons.update();
 
@@ -574,14 +597,43 @@ void loop() {
             d.display();
         }
         // Set flag file so USB MSC mode starts after reboot
-        configMgr.writeFlag("usb_drive");
+        if (!configMgr.writeFlag("usb_drive")) {
+            Serial.println(F("USB flag write FAILED — cannot enter drive mode"));
+            if (dispOk) {
+                auto& d = display.getDisplay();
+                d.clearDisplay();
+                d.setTextSize(1);
+                d.setTextColor(SH110X_WHITE);
+                d.setCursor(0, 30);
+                d.println(F("USB mode FAILED"));
+                d.println();
+                d.println(F("flash write error"));
+                d.display();
+            }
+            delay(2500);
+            // Return to normal mode rather than rebooting into nothing.
+            display.updateMeasureFrom(ctx.config.measureFromFront);
+            display.initScreen();
+            ctx.lastActivityTime = millis();
+            return;
+        }
         delay(1500);
         NVIC_SystemReset();
         // Does not return
     }
+    if (menuMgr.exitAction() == MenuExitAction::REFORMAT_FLASH) {
+        menuMgr.clearExitAction();
+        // On-device FAT formatting can't work on this 2MB chip (SdFat's
+        // FatFormatter only does FAT16/32 and rejects volumes <=6MB). The
+        // recovery is to expose the raw flash over USB and let the host PC
+        // reformat it as FAT. Enter USB drive mode now (no flash write needed).
+        Serial.println(F("Entering USB mode for host reformat..."));
+        enterUsbDriveMode();  // does not return
+    }
     if (menuMgr.exitAction() == MenuExitAction::RETURN_NORMAL) {
         menuMgr.clearExitAction();
         Serial.println(F("Returning to normal mode"));
+        display.updateMeasureFrom(ctx.config.measureFromFront);
         display.initScreen();
         if (laserOk) {
             laser.setLaser(true);
@@ -772,7 +824,7 @@ static void pollButtons(uint32_t now) {
         }
     }
 
-    // ── Button 2 (DISCO) — short press: same as MEASURE, hold 2s: toggle disco ──
+    // ── Button 2 (DISCO) — short press: same as MEASURE (full accuracy), hold 2s: toggle disco ──
     if (buttons.isPressed(Button::DISCO)) {
         ctx.lastActivityTime = now;
         if (!discoHolding) {
@@ -799,7 +851,7 @@ static void pollButtons(uint32_t now) {
             }
         }
     } else {
-        // Released — short press = splay shot (quickShot: wider stability, skip leg check)
+        // Released — short press = same as MEASURE
         if (discoHolding && !discoTriggered) {
             ctx.purpleLatched = false;
 
@@ -809,22 +861,20 @@ static void pollButtons(uint32_t now) {
                 ctx.laserEnabled = true;
                 lastDistance = 0;
                 disco.turnOff();
-                Serial.println(F("SPLAY: unfreezing after leg, live readings"));
+                Serial.println(F("MEASURE(B2): unfreezing after leg, live readings"));
             } else if (ctx.displayFrozen && ctx.laserEnabled) {
                 ctx.displayFrozen = false;
-                ctx.quickShot = true;
                 ctx.currentState = SystemState::TAKING_MEASUREMENT;
                 ctx.measurementTaken = false;
                 measRedLedSet = false;
                 lastDistance = 0;
-                Serial.println(F("SPLAY: taking measurement (from frozen)"));
+                Serial.println(F("MEASURE(B2): taking measurement (from frozen)"));
             } else if (ctx.laserEnabled) {
-                ctx.quickShot = true;
                 ctx.currentState = SystemState::TAKING_MEASUREMENT;
                 ctx.measurementTaken = false;
                 measRedLedSet = false;
                 lastDistance = 0;
-                Serial.println(F("SPLAY: taking measurement"));
+                Serial.println(F("MEASURE(B2): taking measurement"));
             } else if (ctx.currentState == SystemState::IDLE) {
                 if (laserOk) {
                     laser.setBuzzer(true);
@@ -836,9 +886,9 @@ static void pollButtons(uint32_t now) {
                 }
                 ctx.laserEnabled = true;
                 lastDistance = 0;
-                Serial.println(F("SPLAY: laser re-enabled"));
+                Serial.println(F("MEASURE(B2): laser re-enabled"));
             } else {
-                Serial.println(F("SPLAY: system busy, ignored"));
+                Serial.println(F("MEASURE(B2): system busy, ignored"));
                 ctx.currentState = SystemState::IDLE;
             }
         }
@@ -859,15 +909,7 @@ static void pollButtons(uint32_t now) {
     }
 
     // ── Button 4 (SHUTDOWN) — power off with post-measurement guard ──
-    if (buttons.wasPressed(Button::SHUTDOWN)) {
-        uint32_t elapsed = now - ctx.lastMeasurementTime;
-        if (elapsed < Timing::MEASURE_GUARD_MS) {
-            Serial.println(F("SHUTDOWN: guarding after measurement"));
-            delay(Timing::MEASURE_GUARD_MS - elapsed);
-        }
-        Serial.println(F("SHUTDOWN: powering off"));
-        doShutdown();
-    }
+    // Button 4 (SHUTDOWN) handled via interrupt at top of loop()
 
     // ── Fire button (FIRE) — same as MEASURE (trigger button) ──
     if (buttons.wasPressed(Button::FIRE)) {
@@ -991,7 +1033,7 @@ static void pollMeasurement(uint32_t now) {
         return;
     }
 
-    ctx.readings.distance = (distMm / 1000.0f) + ctx.config.laserDistanceOffset;
+    ctx.readings.distance = (distMm / 1000.0f) + (ctx.config.measureFromFront ? -Defaults::laserFrontOffset : ctx.config.laserDistanceOffset);
     lastDistance = ctx.readings.distance;
     Serial.print(F("MEAS: dist=")); Serial.println(ctx.readings.distance, 3);
 
@@ -1031,18 +1073,17 @@ static void pollMeasurement(uint32_t now) {
         }
     }
 
-    // Success!
-    Serial.println(F("MEAS: calling handleSuccess..."));
-    handleMeasurementSuccess();
-    Serial.println(F("MEAS: handleSuccess done"));
-
-    // Update display with shot readings
+    // Success! Show distance immediately before blocking buzzer/wibble sequence
     if (dispOk) {
         display.updateSensorReadings(ctx.readings.distance,
                                      ctx.readings.azimuth,
                                      ctx.readings.inclination);
         display.refresh();
     }
+
+    Serial.println(F("MEAS: calling handleSuccess..."));
+    handleMeasurementSuccess();
+    Serial.println(F("MEAS: handleSuccess done"));
 
     // Freeze display — stays showing shot readings until next button press
     dispAz  = ctx.readings.azimuth;
@@ -1567,10 +1608,21 @@ static void onFlushReading(float az, float inc, float dist) {
 // ═══════════════════════════════════════════════════════════════════
 
 static void initPins() {
+    // A1 (PA05) is the DAC1 output on SAMD51.  The DAC peripheral can
+    // disable the digital input buffer on this pin, making digitalRead()
+    // always return HIGH regardless of the actual pin voltage.  Disable
+    // DAC1 before configuring the pin as a digital input.
+    DAC->CTRLA.bit.ENABLE = 0;
+    while (DAC->SYNCBUSY.bit.ENABLE);
+    DAC->DACCTRL[1].bit.ENABLE = 0;
+    DAC->CTRLA.bit.ENABLE = 1;
+    while (DAC->SYNCBUSY.bit.ENABLE);
+
     pinMode(PIN_BTN_MEASURE,  INPUT_PULLUP);
     pinMode(PIN_BTN_DISCO,    INPUT_PULLUP);
     pinMode(PIN_BTN_CALIB,    INPUT_PULLUP);
     pinMode(PIN_BTN_SHUTDOWN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PIN_BTN_SHUTDOWN), onShutdownINT, FALLING);
     pinMode(PIN_BTN_FIRE,     INPUT_PULLUP);
 
     pinMode(PIN_POWER, OUTPUT);
@@ -1800,16 +1852,16 @@ static void enterUsbDriveMode() {
         d.clearDisplay();
         d.setTextSize(1);
         d.setTextColor(SH110X_WHITE);
-        d.setCursor(0, 10);
+        d.setCursor(0, 4);
         d.println(F("USB Drive Mode"));
         d.println();
-        d.println(F("Unplug & replug USB"));
-        d.println(F("to see the drive."));
+        d.println(F("Replug USB to see"));
+        d.println(F("the drive."));
         d.println();
-        d.println(F("Edit config.json,"));
-        d.println(F("eject drive, then"));
-        d.println(F("hold power button"));
-        d.println(F("to restart."));
+        d.println(F("Edit config, or to"));
+        d.println(F("recover: Format as"));
+        d.println(F("FAT. Then eject &"));
+        d.println(F("power-cycle."));
         d.display();
     }
 

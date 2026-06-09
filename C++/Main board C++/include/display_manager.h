@@ -36,6 +36,9 @@ public:
     /// Show pending BLE reading count (0 = hidden)
     void updateBTNumber(uint16_t pending);
 
+    /// Update measure-from indicator (true = Front, false = Back)
+    void updateMeasureFrom(bool front);
+
     /// Clear display to black
     void blankScreen();
 
@@ -71,8 +74,9 @@ private:
     float    _azimuth     = 0.0f;
     float    _inclination = 0.0f;
     float    _battery     = 0.0f;
-    bool     _btConnected = false;
-    uint16_t _btPending   = 0;
+    bool     _btConnected    = false;
+    uint16_t _btPending      = 0;
+    bool     _measureFromFront = false;
 
     void drawMainScreen();
     void drawBattery(float pct);

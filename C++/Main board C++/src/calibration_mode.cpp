@@ -79,10 +79,10 @@ bool CalibrationMode::update() {
     // so we must NOT call it again here — that would clear edge flags.
     updateBeep();
 
-    // Shutdown button always works
-    if (btns_->wasPressed(Button::SHUTDOWN)) {
-        Serial.println(F("Calibration: shutdown requested"));
-        digitalWrite(PIN_POWER, LOW);
+    // Shutdown button: show confirmation screen instead of immediate power-off
+    if (btns_->wasPressed(Button::SHUTDOWN) &&
+        state_ != CalibState::SHUTDOWN_CONFIRM) {
+        requestShutdown();
         return false;
     }
 
@@ -103,6 +103,7 @@ bool CalibrationMode::update() {
         case CalibState::FB_CALCULATING:       updateFBCalculating(); break;
         case CalibState::FB_RESULTS:           updateFBResults(); break;
         case CalibState::FB_SAVING:            updateFBSaving(); break;
+        case CalibState::SHUTDOWN_CONFIRM:     updateShutdownConfirm(); break;
         default: break;
     }
 
@@ -346,8 +347,18 @@ void CalibrationMode::updateShowResults() {
     } else if (!b1 && b2) {
         holdCounter_ += 0.01f;
         if (holdCounter_ >= HOLD_TIME) {
-            Serial.println(F("Calibration discarded."));
-            state_ = CalibState::DONE;
+            Serial.println(F("Calibration discarded — rebooting to restore saved cal."));
+            auto& d = disp_->getDisplay();
+            d.clearDisplay();
+            d.setTextColor(SH110X_WHITE);
+            d.setTextSize(2);
+            d.setCursor(0, 40);
+            d.println(F("Discarded."));
+            d.setCursor(0, 70);
+            d.print(F("Restarting..."));
+            d.display();
+            delay(2000);
+            NVIC_SystemReset();
         }
     } else {
         holdCounter_ = 0.0f;
@@ -703,15 +714,16 @@ void CalibrationMode::showResultsScreen() {
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
-    // Title
-    d.setTextSize(2);
-    d.setCursor(0, 0);
-    d.println(F("Results"));
-
     char buf[24];
     d.setTextSize(1);
 
     if (calMode_ == CalMode::PART1_ELLIPSOID) {
+        // Title
+        d.setTextSize(2);
+        d.setCursor(0, 0);
+        d.println(F("Results"));
+
+        d.setTextSize(1);
         // Ellipsoid-only results: uniformity metrics
         d.setCursor(0, 28);
         snprintf(buf, sizeof(buf), "Mag:  %.5f", (double)resultMagAcc_);
@@ -724,34 +736,35 @@ void CalibrationMode::showResultsScreen() {
         Serial.print(resultMagAcc_, 4);
         Serial.print(F("  Grav: "));
         Serial.println(resultGravAcc_, 4);
-    } else {
-        // Alignment / short cal results: all three metrics
-        d.setCursor(0, 28);
-        snprintf(buf, sizeof(buf), "Mag:  %.5f", (double)resultMagAcc_);
-        d.println(buf);
-        d.setCursor(0, 40);
-        snprintf(buf, sizeof(buf), "Grav: %.5f", (double)resultGravAcc_);
-        d.println(buf);
-        d.setCursor(0, 52);
-        snprintf(buf, sizeof(buf), "Acc:  %.3f deg", (double)resultAccuracy_);
-        d.println(buf);
 
-        Serial.print(F("Results — Mag: "));
-        Serial.print(resultMagAcc_, 4);
-        Serial.print(F("  Grav: "));
-        Serial.print(resultGravAcc_, 4);
-        Serial.print(F("  Accuracy: "));
+        d.setCursor(0, 72);
+        d.println(F("Hold B1+B2: Save"));
+        d.setCursor(0, 84);
+        d.println(F("Hold B2: Discard+Restart"));
+        d.setCursor(0, 100);
+        d.println(F("Lower = Better"));
+    } else {
+        // Alignment / short cal results: accuracy only
+        d.setTextSize(1);
+        d.setCursor(0, 10);
+        d.println(F("Accuracy:"));
+        d.setTextSize(2);
+        d.setCursor(0, 22);
+        snprintf(buf, sizeof(buf), "%.3f deg", (double)resultAccuracy_);
+        d.println(buf);
+        d.setTextSize(1);
+        d.setCursor(0, 46);
+        d.println(F("< 0.5 is acceptable"));
+
+        Serial.print(F("Results — Accuracy: "));
         Serial.print(resultAccuracy_, 3);
         Serial.println(F(" deg"));
-    }
 
-    // Save/discard instructions
-    d.setCursor(0, 72);
-    d.println(F("Hold B1+B2: Save"));
-    d.setCursor(0, 84);
-    d.println(F("Hold B2: Discard"));
-    d.setCursor(0, 100);
-    d.println(F("Lower = Better"));
+        d.setCursor(0, 94);
+        d.println(F("Hold B1+B2: Save"));
+        d.setCursor(0, 106);
+        d.println(F("Hold B2: Discard+Restart"));
+    }
 
     d.display();
 
@@ -1200,8 +1213,18 @@ void CalibrationMode::updateFBResults() {
     if (b2) {
         holdCounter_ += 0.01f;
         if (holdCounter_ >= HOLD_TIME) {
-            Serial.println(F("FB: exiting field check."));
-            state_ = CalibState::DONE;
+            Serial.println(F("FB: discarded — rebooting to restore saved cal."));
+            auto& d = disp_->getDisplay();
+            d.clearDisplay();
+            d.setTextColor(SH110X_WHITE);
+            d.setTextSize(2);
+            d.setCursor(0, 40);
+            d.println(F("Discarded."));
+            d.setCursor(0, 70);
+            d.print(F("Restarting..."));
+            d.display();
+            delay(2000);
+            NVIC_SystemReset();
         }
     } else {
         holdCounter_ = 0.0f;
@@ -1395,7 +1418,7 @@ void CalibrationMode::showFBResultsScreen() {
     int yHint = 56 + min(fbCount_, 5) * 10 + 6;
     if (yHint > 100) yHint = 100;
     d.setCursor(0, yHint);
-    d.println(F("Hold B2: Exit"));
+    d.println(F("Hold B2: Discard+Restart"));
 
     d.display();
 
@@ -1446,6 +1469,112 @@ float CalibrationMode::fbCircularAverage(const float* buf, int count) const {
     while (avg >= 360.0f) avg -= 360.0f;
     while (avg < 0.0f)    avg += 360.0f;
     return avg;
+}
+
+// ── Shutdown confirmation ────────────────────────────────────────
+
+void CalibrationMode::requestShutdown() {
+    if (state_ == CalibState::SHUTDOWN_CONFIRM) {
+        // SHUTDOWN pressed again while confirm screen is showing — reset hold timer
+        // so the user needs a deliberate continuous hold from scratch.
+        shutdownHoldStart_ = 0;
+        return;
+    }
+    Serial.println(F("Calibration: shutdown requested, showing confirm screen"));
+    preShutdownState_ = state_;
+    state_ = CalibState::SHUTDOWN_CONFIRM;
+    shutdownHoldStart_ = 0;
+    shutdownLastDisplayMs_ = 0;
+    showShutdownConfirmScreen();
+}
+
+void CalibrationMode::updateShutdownConfirm() {
+    static constexpr uint32_t HOLD_SHUTDOWN_MS = 2000;
+    static constexpr uint32_t DISPLAY_UPDATE_MS = 80;
+
+    // Any other button cancels
+    if (btns_->wasPressed(Button::MEASURE) ||
+        btns_->wasPressed(Button::DISCO)   ||
+        btns_->wasPressed(Button::CALIB)   ||
+        btns_->wasPressed(Button::FIRE)) {
+        Serial.println(F("Calibration: shutdown cancelled"));
+        shutdownHoldStart_ = 0;
+        state_ = preShutdownState_;
+        redrawScreen(state_);
+        return;
+    }
+
+    uint32_t now = millis();
+
+    if (btns_->isPressed(Button::SHUTDOWN)) {
+        if (shutdownHoldStart_ == 0) shutdownHoldStart_ = now;
+        uint32_t heldMs = now - shutdownHoldStart_;
+
+        // Update progress bar periodically while holding
+        if (now - shutdownLastDisplayMs_ >= DISPLAY_UPDATE_MS) {
+            shutdownLastDisplayMs_ = now;
+            uint8_t pct = (uint8_t)min(100UL, heldMs * 100UL / HOLD_SHUTDOWN_MS);
+            showShutdownConfirmScreen(pct);
+        }
+
+        if (heldMs >= HOLD_SHUTDOWN_MS) {
+            Serial.println(F("Calibration: shutdown confirmed (hold)"));
+            digitalWrite(PIN_POWER, LOW);
+            while (true) { delay(1000); }
+        }
+    } else {
+        // Released before hold completed — reset and redraw static screen
+        if (shutdownHoldStart_ != 0) {
+            shutdownHoldStart_ = 0;
+            showShutdownConfirmScreen(0);
+        }
+    }
+}
+
+void CalibrationMode::showShutdownConfirmScreen(uint8_t holdPct) {
+    auto& d = disp_->getDisplay();
+    d.clearDisplay();
+    d.setTextColor(SH110X_WHITE);
+
+    d.setTextSize(2);
+    d.setCursor(0, 0);
+    d.println(F("Power Off?"));
+
+    d.setTextSize(1);
+    d.setCursor(0, 36);
+    d.println(F("Calibration progress"));
+    d.println(F("will be lost."));
+    d.println();
+    d.println(F("Hold SHUTDOWN to"));
+    d.println(F("power off."));
+    d.println();
+    d.println(F("Any other button"));
+    d.println(F("to cancel."));
+
+    // Progress bar (only visible while holding)
+    if (holdPct > 0) {
+        const int barX = 0, barY = 118, barW = 128, barH = 8;
+        d.drawRect(barX, barY, barW, barH, SH110X_WHITE);
+        int fillW = (int)(barW * holdPct / 100);
+        if (fillW > 2) d.fillRect(barX + 1, barY + 1, fillW - 2, barH - 2, SH110X_WHITE);
+    }
+
+    d.display();
+}
+
+void CalibrationMode::redrawScreen(CalibState s) {
+    switch (s) {
+        case CalibState::INTRO_ELLIPSOID:      showEllipsoidIntro();    break;
+        case CalibState::INTRO_ALIGNMENT:      showAlignmentIntro();    break;
+        case CalibState::COLLECTING_ELLIPSOID: showEllipsoidScreen();   break;
+        case CalibState::COLLECTING_ALIGNMENT: showAlignmentProgress(); break;
+        case CalibState::SHOW_RESULTS:         showResultsScreen();     break;
+        case CalibState::FB_INTRO:             showFBIntroScreen();     break;
+        case CalibState::FB_WAIT_FORESIGHT:
+        case CalibState::FB_WAIT_BACKSIGHT:    showFBLiveScreen();      break;
+        case CalibState::FB_RESULTS:           showFBResultsScreen();   break;
+        default: break;
+    }
 }
 
 // ── Calibration save ────────────────────────────────────────────

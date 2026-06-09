@@ -100,6 +100,7 @@ void setup() {
     // BLE stack — increase event length for Coded PHY (default 3 is too short)
     Bluefruit.configPrphConn(BLE_GATT_ATT_MTU_DEFAULT, 24, BLE_GATTS_HVN_TX_QUEUE_SIZE_DEFAULT, BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
     Bluefruit.begin();
+    Bluefruit.autoConnLed(false);            // disable red LED blink to save power
     Bluefruit.setTxPower(BLE_TX_POWER);     // +8 dBm for advertising
     Bluefruit.setName(deviceName.c_str());
 

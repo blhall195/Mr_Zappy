@@ -17,6 +17,56 @@ Adafruit_SPIFlash* ConfigManager::getFlash() {
     return &s_flash;
 }
 
+// ── Robust flash write ──────────────────────────────────────────────
+// QSPI writes occasionally fail right after heavy I2C/SERCOM activity
+// (laser UART, BLE, sensor polling) — see Session 13. These helpers add
+// a settle delay, retry up to 3x, and remount the filesystem between
+// attempts so a transient failure no longer surfaces as a hard "save
+// fail". s_remount re-inits the QSPI transport + FAT volume in place.
+static bool s_remount() {
+    // Re-mount the FAT volume only. Do NOT re-run s_flash.begin() — that
+    // re-reads the JEDEC ID over the live QSPI link and can mis-detect the
+    // chip (size → 0), breaking every subsequent flash operation.
+    return s_fatfs.begin(&s_flash);
+}
+
+// Atomic byte-blob write: data → tmpPath, sync, then rename over path so
+// a failed/interrupted write never corrupts the existing file.
+static bool writeFileAtomic(const char* path, const char* tmpPath,
+                            const uint8_t* data, size_t len) {
+    // Let any in-flight SERCOM traffic drain and QSPI settle before writing.
+    delay(20);
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        s_fatfs.remove(tmpPath);
+
+        File32 file = s_fatfs.open(tmpPath, FILE_WRITE);
+        if (file) {
+            size_t written = file.write(data, len);
+            file.sync();
+            file.close();
+            if (written == len) {
+                s_fatfs.remove(path);
+                if (s_fatfs.rename(tmpPath, path)) {
+                    if (attempt > 0) {
+                        Serial.print(F("  flash write OK on retry "));
+                        Serial.println(attempt);
+                    }
+                    return true;
+                }
+            }
+        }
+
+        Serial.print(F("  flash write FAILED (attempt "));
+        Serial.print(attempt + 1);
+        Serial.println(F(") — remounting"));
+        s_fatfs.remove(tmpPath);
+        if (!s_remount()) Serial.println(F("  remount FAILED"));
+        delay(50);
+    }
+    return false;
+}
+
 // ── begin() ────────────────────────────────────────────────────────
 bool ConfigManager::begin() {
     if (mounted_) return true;  // already initialized — idempotent
@@ -156,10 +206,13 @@ bool ConfigManager::loadConfig(Config& cfg) {
     cfg.autoShutdownTimeout   = doc["auto_shutdown_timeout"]   | Defaults::autoShutdownTimeout;
     cfg.laserTimeout          = doc["laser_timeout"]           | Defaults::laserTimeout;
     cfg.laserWibble           = doc["laser_wibble"]            | Defaults::laserWibble;
+    cfg.measureFromFront      = doc["measure_from_front"]      | Defaults::measureFromFront;
     cfg.screenBrightness      = doc["screen_brightness"]       | (int)Defaults::screenBrightness;
 
-    const char* name = doc["ble_name"] | Defaults::bleName;
-    strncpy(cfg.bleName, name, Defaults::bleNameMaxLen);
+    const char* rawName = doc["ble_name"] | Defaults::bleName;
+    // Strip SAP6_ prefix if user included it — we always prepend it ourselves
+    const char* userPart = (strncmp(rawName, "SAP6_", 5) == 0) ? rawName + 5 : rawName;
+    snprintf(cfg.bleName, sizeof(cfg.bleName), "SAP6_%s", userPart);
     cfg.bleName[Defaults::bleNameMaxLen] = '\0';
 
     Serial.print(F("  Loaded ble_name: ")); Serial.println(cfg.bleName);
@@ -170,12 +223,6 @@ bool ConfigManager::loadConfig(Config& cfg) {
 
 bool ConfigManager::saveConfig(const Config& cfg) {
     if (!mounted_) return false;
-
-    // Atomic write: write to temp file, sync, then replace original.
-    s_fatfs.remove("/cfg_tmp.json");
-
-    File32 file = s_fatfs.open("/cfg_tmp.json", FILE_WRITE);
-    if (!file) return false;
 
     JsonDocument doc;
 
@@ -200,20 +247,23 @@ bool ConfigManager::saveConfig(const Config& cfg) {
     doc["auto_shutdown_timeout"]  = cfg.autoShutdownTimeout;
     doc["laser_timeout"]          = cfg.laserTimeout;
     doc["laser_wibble"]           = cfg.laserWibble;
+    doc["measure_from_front"]     = cfg.measureFromFront;
     doc["screen_brightness"]      = (int)cfg.screenBrightness;
-    doc["ble_name"]               = cfg.bleName;
+    // Save only the user portion — SAP6_ prefix is always auto-prepended on load
+    const char* nameToSave = (strncmp(cfg.bleName, "SAP6_", 5) == 0) ? cfg.bleName + 5 : cfg.bleName;
+    doc["ble_name"]               = nameToSave;
 
-    size_t written = serializeJsonPretty(doc, file);
-    file.sync();
-    file.close();
-    if (written == 0) {
-        s_fatfs.remove("/cfg_tmp.json");
+    // Serialize to a RAM buffer first, then write atomically with retry.
+    char buf[1280];
+    if (measureJsonPretty(doc) >= sizeof(buf)) {
+        Serial.println(F("Config JSON too large for buffer"));
         return false;
     }
+    size_t len = serializeJsonPretty(doc, buf, sizeof(buf));
+    if (len == 0) return false;
 
-    s_fatfs.remove("/config.json");
-    s_fatfs.rename("/cfg_tmp.json", "/config.json");
-    return true;
+    return writeFileAtomic("/config.json", "/cfg_tmp.json",
+                           reinterpret_cast<const uint8_t*>(buf), len);
 }
 
 // ── Calibration data ───────────────────────────────────────────────
@@ -238,25 +288,8 @@ bool ConfigManager::loadCalibrationJson(char* buf, size_t bufSize, size_t& bytes
 
 bool ConfigManager::saveCalibrationJson(const char* json, size_t len) {
     if (!mounted_) return false;
-
-    // Atomic write: write to temp file, sync, then replace original.
-    // If power dies during write, old calibration file remains intact.
-    s_fatfs.remove("/cal_tmp.json");
-
-    File32 file = s_fatfs.open("/cal_tmp.json", FILE_WRITE);
-    if (!file) return false;
-
-    size_t written = file.write(json, len);
-    file.sync();
-    file.close();
-    if (written != len) {
-        s_fatfs.remove("/cal_tmp.json");
-        return false;
-    }
-
-    s_fatfs.remove("/calibration.json");
-    s_fatfs.rename("/cal_tmp.json", "/calibration.json");
-    return true;
+    return writeFileAtomic("/calibration.json", "/cal_tmp.json",
+                           reinterpret_cast<const uint8_t*>(json), len);
 }
 
 bool ConfigManager::loadCalibrationBinary(MagCal::CalibrationBinary& out) {
@@ -278,44 +311,16 @@ bool ConfigManager::loadCalibrationBinary(MagCal::CalibrationBinary& out) {
 
 bool ConfigManager::saveCalibrationBinary(const MagCal::CalibrationBinary& data) {
     if (!mounted_) return false;
-
-    // Atomic write: write to temp file, sync, then replace original.
-    // If power dies during write, old calibration file remains intact.
-    s_fatfs.remove("/cal_tmp.bin");
-
-    File32 file = s_fatfs.open("/cal_tmp.bin", FILE_WRITE);
-    if (!file) return false;
-
-    size_t written = file.write(reinterpret_cast<const uint8_t*>(&data), sizeof(data));
-    file.sync();
-    file.close();
-    if (written != sizeof(data)) {
-        s_fatfs.remove("/cal_tmp.bin");
-        return false;
-    }
-
-    s_fatfs.remove("/calibration.bin");
-    s_fatfs.rename("/cal_tmp.bin", "/calibration.bin");
-    return true;
+    return writeFileAtomic("/calibration.bin", "/cal_tmp.bin",
+                           reinterpret_cast<const uint8_t*>(&data), sizeof(data));
 }
 
 // ── Calibration quality metrics ─────────────────────────────────────
 
 bool ConfigManager::saveCalMetrics(const CalMetrics& m) {
     if (!mounted_) return false;
-    s_fatfs.remove("/met_tmp.bin");
-    File32 file = s_fatfs.open("/met_tmp.bin", FILE_WRITE);
-    if (!file) return false;
-    size_t written = file.write(reinterpret_cast<const uint8_t*>(&m), sizeof(m));
-    file.sync();
-    file.close();
-    if (written != sizeof(m)) {
-        s_fatfs.remove("/met_tmp.bin");
-        return false;
-    }
-    s_fatfs.remove("/cal_metrics.bin");
-    s_fatfs.rename("/met_tmp.bin", "/cal_metrics.bin");
-    return true;
+    return writeFileAtomic("/cal_metrics.bin", "/met_tmp.bin",
+                           reinterpret_cast<const uint8_t*>(&m), sizeof(m));
 }
 
 bool ConfigManager::loadCalMetrics(CalMetrics& m) {
@@ -454,11 +459,27 @@ bool ConfigManager::writeFlag(const char* name) {
     char path[32];
     buildFlagPath(name, path, sizeof(path));
 
-    File32 file = s_fatfs.open(path, FILE_WRITE);
-    if (!file) return false;
-    file.write('1');
-    file.close();
-    return true;
+    delay(20);  // let SERCOM/QSPI settle (same fragility as data writes)
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        // begin() creates /flags, but a remount below won't — ensure it exists.
+        if (!s_fatfs.exists("/flags")) s_fatfs.mkdir("/flags");
+
+        File32 file = s_fatfs.open(path, FILE_WRITE);
+        if (file) {
+            file.write('1');
+            file.sync();
+            file.close();
+            if (s_fatfs.exists(path)) return true;
+        }
+
+        Serial.print(F("  flag write FAILED (attempt "));
+        Serial.print(attempt + 1);
+        Serial.println(F(") — remounting"));
+        if (!s_remount()) Serial.println(F("  remount FAILED"));
+        delay(50);
+    }
+    return false;
 }
 
 bool ConfigManager::hasFlag(const char* name) {

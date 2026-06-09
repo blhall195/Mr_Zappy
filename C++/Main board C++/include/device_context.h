@@ -41,6 +41,7 @@ struct Config {
     uint32_t autoShutdownTimeout   = Defaults::autoShutdownTimeout;
     uint32_t laserTimeout          = Defaults::laserTimeout;
     bool     laserWibble           = Defaults::laserWibble;
+    bool     measureFromFront      = Defaults::measureFromFront;
     uint8_t  screenBrightness     = Defaults::screenBrightness;
     char     bleName[Defaults::bleNameMaxLen + 1] = {}; // initialized in constructor
 
