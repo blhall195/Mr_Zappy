@@ -1,0 +1,40 @@
+name: Build BLE Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build BLE board
+        run: platformio run
+        working-directory: "C++/DiscoX C++ BLE"
+
+      - name: Convert BLE board to UF2
+        run: |
+          python3 tools/uf2conv.py \
+            "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.hex" \
+            --family 0xada52840 --convert \
+            --output "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"
+
+      - name: Upload BLE board UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: ble-board-${{ github.run_number }}
+          path: "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"

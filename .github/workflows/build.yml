@@ -1,0 +1,40 @@
+name: Build Firmware
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build main board
+        run: platformio run
+        working-directory: "C++/Main board C++"
+
+      - name: Convert main board to UF2
+        run: |
+          python3 tools/uf2conv.py \
+            "C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.bin" \
+            --base 0x4000 --family 0x55114460 \
+            --output "C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.uf2"
+
+      - name: Upload main board UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-board-${{ github.run_number }}
+          path: "C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.uf2"
