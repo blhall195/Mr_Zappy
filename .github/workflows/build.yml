@@ -26,10 +26,6 @@ jobs:
         run: platformio run
         working-directory: "C++/Main board C++"
 
-      - name: Build BLE board
-        run: platformio run
-        working-directory: "C++/DiscoX C++ BLE"
-
       - name: Convert main board to UF2
         run: |
           python3 tools/uf2conv.py \
@@ -37,21 +33,8 @@ jobs:
             --base 0x4000 --family 0x55114460 \
             --output "C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.uf2"
 
-      - name: Convert BLE board to UF2
-        run: |
-          python3 tools/uf2conv.py \
-            "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.hex" \
-            --family 0xada52840 --convert \
-            --output "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"
-
       - name: Upload main board UF2
         uses: actions/upload-artifact@v4
         with:
           name: main-board-${{ github.run_number }}
           path: "C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.uf2"
-
-      - name: Upload BLE board UF2
-        uses: actions/upload-artifact@v4
-        with:
-          name: ble-board-${{ github.run_number }}
-          path: "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"
