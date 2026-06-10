@@ -47,11 +47,11 @@ jobs:
       - name: Upload main board UF2
         uses: actions/upload-artifact@v4
         with:
-          name: main-board-${{ github.sha }}
+          name: main-board-${{ github.run_number }}
           path: "C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.uf2"
 
       - name: Upload BLE board UF2
         uses: actions/upload-artifact@v4
         with:
-          name: ble-board-${{ github.sha }}
+          name: ble-board-${{ github.run_number }}
           path: "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"
