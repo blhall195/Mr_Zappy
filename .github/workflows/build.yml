@@ -1,0 +1,57 @@
+name: Build Firmware
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+
+      - name: Install PlatformIO
+        run: pip install platformio uf2utils
+
+      - name: Build main board
+        run: platformio run
+        working-directory: "C++/Main board C++"
+
+      - name: Build BLE board
+        run: platformio run
+        working-directory: "C++/DiscoX C++ BLE"
+
+      - name: Convert main board to UF2
+        run: |
+          uf2conv .pio/build/adafruit_feather_m4_can/firmware.bin \
+            --base 0x4000 --family 0x55114460 \
+            --output .pio/build/adafruit_feather_m4_can/firmware.uf2
+        working-directory: "C++/Main board C++"
+
+      - name: Convert BLE board to UF2
+        run: |
+          uf2conv .pio/build/adafruit_itsybitsy_nrf52840/firmware.hex \
+            --family 0xada52840 --convert \
+            --output .pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2
+        working-directory: "C++/DiscoX C++ BLE"
+
+      - name: Upload main board UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-board-${{ github.sha }}
+          path: "C++/Main board C++/.pio/build/adafruit_feather_m4_can/firmware.uf2"
+
+      - name: Upload BLE board UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: ble-board-${{ github.sha }}
+          path: "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"
