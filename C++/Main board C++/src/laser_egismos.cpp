@@ -1,5 +1,5 @@
 #include "laser_egismos.h"
-#include <string.h>  // memcmp
+#include <Arduino.h>
 
 // ── Public API ──────────────────────────────────────────────────────
 
@@ -21,6 +21,37 @@ LaserError LaserEgismos::setBuzzer(bool on) {
     uint8_t data = on ? 0x01 : 0x00;
     _lastError = sendCommandExpectAck(CMD_BUZZER_CONTROL, &data, 1);
     return _lastError;
+}
+
+void LaserEgismos::singleBeep() {
+    delay(25);
+    setBuzzer(true);
+    delay(25);
+    setBuzzer(false);
+}
+
+void LaserEgismos::doubleBeep() {
+    singleBeep();
+    singleBeep();
+}
+
+void LaserEgismos::failureBeep() {
+    delay(25);
+    for (int i = 0; i < 6; i++) {
+        setBuzzer(true);
+        delay(32);
+    }
+    setBuzzer(false);
+}
+
+void LaserEgismos::wibble() {
+    delay(25);
+    for (int i = 0; i < 4; i++) {
+        setLaser(true);
+        delay(150);
+        setLaser(false);
+        delay(200);
+    }
 }
 
 LaserError LaserEgismos::stopMeasuring() {

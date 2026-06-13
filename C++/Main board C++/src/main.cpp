@@ -1110,17 +1110,9 @@ static void pollMeasurement(uint32_t now) {
 static void handleMeasurementSuccess() {
     ctx.lastMeasurementTime = millis();
 
-    // Green LED + success beep
+    // Green disco to indicate successful reading.
+    // Beep later after we know if there was a successful leg.
     disco.setGreen();
-    if (laserOk) {
-        delay(25);
-        laser.setBuzzer(true);
-        delay(100);
-        laser.setBuzzer(false);
-        delay(25);
-    } else {
-        delay(150);
-    }
 
     Serial.print(F("  HS:2 bleConn="));
     Serial.print(ctx.bleConnected);
@@ -1150,55 +1142,59 @@ static void handleMeasurementSuccess() {
         ctx.measurementTaken = false;
         return;
     }
+
     Serial.println(F("  HS:3 leg buf")); Serial.flush();
     uint8_t idx = ctx.stableBufCount;
+
     if (idx < 3) {
+        // Buffer not full, add the readings to the end.
         ctx.stableAzimuthBuf[idx]     = ctx.readings.azimuth;
         ctx.stableInclinationBuf[idx] = ctx.readings.inclination;
         ctx.stableDistanceBuf[idx]    = ctx.readings.distance;
         ctx.stableBufCount++;
     } else {
-        // Shift left and add new
+        // Buffer full, discard oldest readings and shift the rest left to make room for the new ones.
+
+        // Shift Azimuth
         ctx.stableAzimuthBuf[0]     = ctx.stableAzimuthBuf[1];
         ctx.stableAzimuthBuf[1]     = ctx.stableAzimuthBuf[2];
-        ctx.stableAzimuthBuf[2]     = ctx.readings.azimuth;
+        // Shift Inclination
         ctx.stableInclinationBuf[0] = ctx.stableInclinationBuf[1];
         ctx.stableInclinationBuf[1] = ctx.stableInclinationBuf[2];
-        ctx.stableInclinationBuf[2] = ctx.readings.inclination;
+        // Shift Distance
         ctx.stableDistanceBuf[0]    = ctx.stableDistanceBuf[1];
         ctx.stableDistanceBuf[1]    = ctx.stableDistanceBuf[2];
+
+        // Add the new readings
+        ctx.stableAzimuthBuf[2]     = ctx.readings.azimuth;
+        ctx.stableInclinationBuf[2] = ctx.readings.inclination;
         ctx.stableDistanceBuf[2]    = ctx.readings.distance;
     }
 
     Serial.println(F("  HS:4 leg check")); Serial.flush();
+
     // Check leg completion when we have 3 readings
     if (ctx.stableBufCount >= 3) {
-        bool azOk   = bearingsWithinTol(ctx.stableAzimuthBuf, 3,
-                                         ctx.config.legAngleTolerance);
-        bool incOk  = linearWithinTol(ctx.stableInclinationBuf, 3,
-                                       ctx.config.legAngleTolerance);
-        bool distOk = linearWithinTol(ctx.stableDistanceBuf, 3,
-                                       ctx.config.legDistanceTolerance);
+        bool azOk   = bearingsWithinTol(ctx.stableAzimuthBuf, 3, ctx.config.legAngleTolerance);
+        bool incOk  = linearWithinTol(ctx.stableInclinationBuf, 3, ctx.config.legAngleTolerance);
+        bool distOk = linearWithinTol(ctx.stableDistanceBuf, 3, ctx.config.legDistanceTolerance);
 
-        if (azOk && incOk && distOk) {
-            // Leg complete! Triple buzz + white flash
+        bool legComplete = azOk && incOk && distOk;
+
+        if (legComplete) {
+            // Triple buzz + white flash
             for (int i = 0; i < 3; i++) {
-                if (laserOk) laser.setBuzzer(true);
+                laser.setBuzzer(true);
                 disco.setWhite();
                 delay(100);
-                if (laserOk) laser.setBuzzer(false);
+                laser.setBuzzer(false);
                 disco.turnOff();
                 delay(100);
             }
 
             // Laser wibble to indicate leg detected
-            if (laserOk && ctx.config.laserWibble) {
-                for (int i = 0; i < 4; i++) {
-                    laser.setLaser(true);
-                    delay(150);
-                    laser.setLaser(false);
-                    delay(200);
-                }
+            if (ctx.config.laserWibble) {
+                laser.wibble();
             }
 
             // Clear buffers
@@ -1214,6 +1210,10 @@ static void handleMeasurementSuccess() {
         }
     }
 
+    // Successful reading but leg not complete
+    // (function already returned if leg complete)
+    laser.doubleBeep();
+
     Serial.println(F("  HS:5 done")); Serial.flush();
     ctx.measurementTaken = false;
 }
@@ -1225,6 +1225,7 @@ static void alertError(const char* errCode) {
         display.refresh();
     }
 
+    // Red failure disco
     disco.turnOff();
     for (int i = 0; i < 4; i++) {
         disco.setRed();
@@ -1233,15 +1234,11 @@ static void alertError(const char* errCode) {
         delay(100);
     }
 
-    // Beep after error flashes, re-enable laser
-    if (laserOk) {
-        laser.setBuzzer(true);
-        delay(100);
-        laser.setBuzzer(false);
-        delay(25);
-        laser.setLaser(true);
-        delay(25);
-    }
+    // Beep after error flashes
+    laser.failureBeep();
+
+    // Re-enable laser
+    laser.setLaser(true);
     ctx.laserEnabled = true;
     ctx.measurementTaken = true;
 }

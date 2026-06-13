@@ -24,6 +24,11 @@ public:
     LaserError setBuzzer(bool on);
     LaserError stopMeasuring();
 
+    void singleBeep();
+    void doubleBeep();
+    void failureBeep();
+    void wibble();
+
     // Single measurement. Distance returned in mm via out param.
     LaserError measure(int32_t& distanceMm);
 

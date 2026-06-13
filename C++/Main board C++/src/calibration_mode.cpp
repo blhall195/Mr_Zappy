@@ -1115,12 +1115,7 @@ void CalibrationMode::updateFBWaitShot() {
 
                 // Laser wibble to indicate leg detected
                 if (fbLaserWibble_) {
-                    for (int i = 0; i < 4; i++) {
-                        laser_->setLaser(true);
-                        delay(150);
-                        laser_->setLaser(false);
-                        delay(200);
-                    }
+                    laser_->wibble();
                 }
 
                 // Laser fully off after leg
