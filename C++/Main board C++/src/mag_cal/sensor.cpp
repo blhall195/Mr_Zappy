@@ -5,17 +5,11 @@
 
 namespace MagCal {
 
-Sensor::Sensor(const char* axesStr)
-    : axes_(axesStr)
-    , transform_(Eigen::Matrix3f::Identity())
-    , centre_(Eigen::Vector3f::Zero())
-    , hasRbfs_(false)
-    , fieldAvg_(0.0f)
-    , fieldStd_(0.0f)
-    , calibrated_(false)
-{}
+Sensor::Sensor(const char *axesStr)
+    : axes_(axesStr), transform_(Eigen::Matrix3f::Identity()), centre_(Eigen::Vector3f::Zero()),
+      hasRbfs_(false), fieldAvg_(0.0f), fieldStd_(0.0f), calibrated_(false) {}
 
-Eigen::Vector3f Sensor::apply(const Eigen::Vector3f& raw) const {
+Eigen::Vector3f Sensor::apply(const Eigen::Vector3f &raw) const {
     // 1. Fix axes: permute and flip from sensor coords to device coords
     Eigen::Vector3f data = axes_.fixAxes(raw);
 
@@ -35,7 +29,7 @@ Eigen::Vector3f Sensor::apply(const Eigen::Vector3f& raw) const {
     return data;
 }
 
-Eigen::Vector3f Sensor::applyNonLinear(const Eigen::Vector3f& vec) const {
+Eigen::Vector3f Sensor::applyNonLinear(const Eigen::Vector3f &vec) const {
     // Python: scale = self.transform[0,0]
     //         normalised_v = vectors * scale
     //         vectors[i] += self.rbfs[i](normalised_v[i]) / scale
@@ -50,7 +44,7 @@ Eigen::Vector3f Sensor::applyNonLinear(const Eigen::Vector3f& vec) const {
     return result;
 }
 
-float Sensor::getFieldStrength(const Eigen::Vector3f& raw) const {
+float Sensor::getFieldStrength(const Eigen::Vector3f &raw) const {
     Eigen::Vector3f corrected = apply(raw);
     // Convert back to original units using mean of diagonal
     float meanDiag = transform_.diagonal().mean();
@@ -58,8 +52,10 @@ float Sensor::getFieldStrength(const Eigen::Vector3f& raw) const {
     return scaled.norm();
 }
 
-bool Sensor::checkAnomaly(const Eigen::Vector3f& raw, float tolerance) const {
-    if (fieldAvg_ == 0.0f) return false;  // no reference data
+bool Sensor::checkAnomaly(const Eigen::Vector3f &raw, float tolerance) const {
+    if (fieldAvg_ == 0.0f) {
+        return false; // no reference data
+    }
     float strength = getFieldStrength(raw);
     float acceptable = fmaxf(fieldStd_ * 3.0f, fieldAvg_ * tolerance);
     float variation = fabsf(fieldAvg_ - strength);
@@ -68,15 +64,19 @@ bool Sensor::checkAnomaly(const Eigen::Vector3f& raw, float tolerance) const {
 
 bool Sensor::fromJson(JsonObjectConst dict) {
     // axes
-    const char* axesStr = dict["axes"] | "+X+Y+Z";
+    const char *axesStr = dict["axes"] | "+X+Y+Z";
     axes_ = Axes(axesStr);
 
     // transform: 3x3 matrix
     JsonArrayConst tArr = dict["transform"];
-    if (!tArr || tArr.size() != 3) return false;
+    if (!tArr || tArr.size() != 3) {
+        return false;
+    }
     for (int r = 0; r < 3; r++) {
         JsonArrayConst row = tArr[r];
-        if (!row || row.size() != 3) return false;
+        if (!row || row.size() != 3) {
+            return false;
+        }
         for (int c = 0; c < 3; c++) {
             transform_(r, c) = row[c].as<float>();
         }
@@ -84,7 +84,9 @@ bool Sensor::fromJson(JsonObjectConst dict) {
 
     // centre: array of 3
     JsonArrayConst cArr = dict["centre"];
-    if (!cArr || cArr.size() != 3) return false;
+    if (!cArr || cArr.size() != 3) {
+        return false;
+    }
     for (int i = 0; i < 3; i++) {
         centre_[i] = cArr[i].as<float>();
     }
@@ -110,9 +112,14 @@ bool Sensor::fromJson(JsonObjectConst dict) {
                     // Check if all params are zero (Y-axis in mag has all zeros)
                     bool allZero = true;
                     for (int k = 0; k < count; k++) {
-                        if (params[k] != 0.0f) { allZero = false; break; }
+                        if (params[k] != 0.0f) {
+                            allZero = false;
+                            break;
+                        }
                     }
-                    if (!allZero) hasRbfs_ = true;
+                    if (!allZero) {
+                        hasRbfs_ = true;
+                    }
                 }
             }
         }
@@ -149,7 +156,7 @@ void Sensor::toJson(JsonObject dict) const {
     for (int axis = 0; axis < 3; axis++) {
         JsonArray axisArr = rbfArr.add<JsonArray>();
         if (rbfs_[axis].isValid()) {
-            const float* p = rbfs_[axis].params();
+            const float *p = rbfs_[axis].params();
             for (int j = 0; j < rbfs_[axis].paramCount(); j++) {
                 JsonArray nested = axisArr.add<JsonArray>();
                 nested.add(p[j]);
@@ -163,16 +170,19 @@ void Sensor::toJson(JsonObject dict) const {
 
 // ── Binary serialization ─────────────────────────────────────────────
 
-bool Sensor::fromBinary(const SensorBinary& bin) {
+bool Sensor::fromBinary(const SensorBinary &bin) {
     axes_ = Axes(bin.axes);
 
     // transform: row-major flat array → Eigen Matrix3f
-    for (int r = 0; r < 3; r++)
-        for (int c = 0; c < 3; c++)
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
             transform_(r, c) = bin.transform[r * 3 + c];
+        }
+    }
 
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++) {
         centre_[i] = bin.centre[i];
+    }
 
     // RBFs
     hasRbfs_ = false;
@@ -181,7 +191,10 @@ bool Sensor::fromBinary(const SensorBinary& bin) {
         if (count > 0 && count <= RBF::MAX_PARAMS) {
             rbfs_[axis].init(bin.rbfParams[axis], count);
             for (int k = 0; k < count; k++) {
-                if (bin.rbfParams[axis][k] != 0.0f) { hasRbfs_ = true; break; }
+                if (bin.rbfParams[axis][k] != 0.0f) {
+                    hasRbfs_ = true;
+                    break;
+                }
             }
         }
     }
@@ -192,30 +205,34 @@ bool Sensor::fromBinary(const SensorBinary& bin) {
     return true;
 }
 
-void Sensor::toBinary(SensorBinary& bin) const {
+void Sensor::toBinary(SensorBinary &bin) const {
     memset(&bin, 0, sizeof(bin));
 
     // axes
-    const char* s = axes_.toString();
+    const char *s = axes_.toString();
     strncpy(bin.axes, s, 6);
     bin.axes[6] = '\0';
 
     // transform: Eigen Matrix3f → row-major flat array
-    for (int r = 0; r < 3; r++)
-        for (int c = 0; c < 3; c++)
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
             bin.transform[r * 3 + c] = transform_(r, c);
+        }
+    }
 
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++) {
         bin.centre[i] = centre_[i];
+    }
 
     // RBFs
     for (int axis = 0; axis < 3; axis++) {
         int count = rbfs_[axis].paramCount();
         bin.rbfParamCount[axis] = (uint8_t)count;
         if (count > 0) {
-            const float* p = rbfs_[axis].params();
-            for (int j = 0; j < count; j++)
+            const float *p = rbfs_[axis].params();
+            for (int j = 0; j < count; j++) {
                 bin.rbfParams[axis][j] = p[j];
+            }
         }
     }
 
@@ -225,7 +242,7 @@ void Sensor::toBinary(SensorBinary& bin) const {
 
 // ── Fitting methods (Session 11) ────────────────────────────────────
 
-float Sensor::fitEllipsoid(const std::vector<Eigen::Vector3f>& data) {
+float Sensor::fitEllipsoid(const std::vector<Eigen::Vector3f> &data) {
     // Port of Python sensor.py fit_ellipsoid()
     // Session 17: double-precision fitting for numerical stability
     // Fit ax² + by² + cz² + 2dxy + 2exz + 2fyz + 2gx + 2hy + 2iz = 1
@@ -264,10 +281,7 @@ float Sensor::fitEllipsoid(const std::vector<Eigen::Vector3f>& data) {
 
     // Build 4x4 matrix A4
     Eigen::Matrix4d A4;
-    A4 << a,  d,  e,  g,
-          d,  bv, f,  h,
-          e,  f,  c,  iv,
-          g,  h,  iv, -1.0;
+    A4 << a, d, e, g, d, bv, f, h, e, f, c, iv, g, h, iv, -1.0;
 
     // Extract A3 (3x3 upper-left)
     Eigen::Matrix3d A3 = A4.block<3, 3>(0, 0);
@@ -310,19 +324,24 @@ float Sensor::fitEllipsoid(const std::vector<Eigen::Vector3f>& data) {
     return uniformity(data);
 }
 
-void Sensor::alignAlongAxis(const std::vector<std::vector<Eigen::Vector3f>>& datasets,
-                            char axis) {
+void Sensor::alignAlongAxis(const std::vector<std::vector<Eigen::Vector3f>> &datasets, char axis) {
     // Port of Python sensor.py align_along_axis()
     // Session 17: double-precision fitting
     int axisIdx = -1;
-    if (axis == 'X') axisIdx = 0;
-    else if (axis == 'Y') axisIdx = 1;
-    else if (axis == 'Z') axisIdx = 2;
-    if (axisIdx < 0) return;
+    if (axis == 'X') {
+        axisIdx = 0;
+    } else if (axis == 'Y') {
+        axisIdx = 1;
+    } else if (axis == 'Z') {
+        axisIdx = 2;
+    }
+    if (axisIdx < 0) {
+        return;
+    }
 
     Eigen::Vector3d result = Eigen::Vector3d::Zero();
 
-    for (const auto& points : datasets) {
+    for (const auto &points : datasets) {
         Eigen::Vector3d vec = findPlane(points);
         if (vec[axisIdx] < 0.0) {
             vec = -vec;
@@ -333,7 +352,7 @@ void Sensor::alignAlongAxis(const std::vector<std::vector<Eigen::Vector3f>>& dat
     alignToVector(result, axis);
 }
 
-Eigen::Vector3d Sensor::findPlane(const std::vector<Eigen::Vector3f>& data) const {
+Eigen::Vector3d Sensor::findPlane(const std::vector<Eigen::Vector3f> &data) const {
     // Port of Python sensor.py _find_plane()
     // Session 17: double-precision fitting
     const int N = (int)data.size();
@@ -351,7 +370,7 @@ Eigen::Vector3d Sensor::findPlane(const std::vector<Eigen::Vector3f>& data) cons
     return normalized(normal);
 }
 
-void Sensor::alignToVector(const Eigen::Vector3d& vector, char axis) {
+void Sensor::alignToVector(const Eigen::Vector3d &vector, char axis) {
     // Port of Python sensor.py _align_to_vector()
     // Session 17: double-precision fitting
     Eigen::Vector3d vx, vy, vz;
@@ -386,11 +405,14 @@ void Sensor::alignToVector(const Eigen::Vector3d& vector, char axis) {
     transform_ = (mat.transpose() * transformD).cast<float>();
 }
 
-void Sensor::setNonLinearParams(const float* params, int totalCount) {
+void Sensor::setNonLinearParams(const float *params, int totalCount) {
     // Port of Python sensor.py set_non_linear_params()
     // params has 3 * paramCount elements: [x0,x1,...,y0,y1,...,z0,z1,...]
     int paramCount = totalCount / 3;
-    if (paramCount <= 0) { setLinear(); return; }
+    if (paramCount <= 0) {
+        setLinear();
+        return;
+    }
 
     hasRbfs_ = false;
     for (int ax = 0; ax < 3; ax++) {
@@ -413,11 +435,13 @@ void Sensor::setLinear() {
     }
 }
 
-float Sensor::uniformity(const std::vector<Eigen::Vector3f>& data) const {
+float Sensor::uniformity(const std::vector<Eigen::Vector3f> &data) const {
     // Port of Python sensor.py uniformity()
     // Session 17: double accumulator for numerical stability
     const int N = (int)data.size();
-    if (N == 0) return 0.0f;
+    if (N == 0) {
+        return 0.0f;
+    }
 
     double sumSqDiff = 0.0;
     for (int i = 0; i < N; i++) {
@@ -428,11 +452,13 @@ float Sensor::uniformity(const std::vector<Eigen::Vector3f>& data) const {
     return (float)sqrt(sumSqDiff / N);
 }
 
-void Sensor::setExpectedFieldStrengths(const std::vector<Eigen::Vector3f>& data) {
+void Sensor::setExpectedFieldStrengths(const std::vector<Eigen::Vector3f> &data) {
     // Port of Python sensor.py set_expected_field_strengths()
     // Session 17: double accumulator for numerical stability
     const int N = (int)data.size();
-    if (N == 0) return;
+    if (N == 0) {
+        return;
+    }
 
     double sum = 0.0;
     std::vector<double> strengths(N);

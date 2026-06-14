@@ -6,8 +6,7 @@
 // SERCOM1 is nominally allocated to the SPI header but this project
 // doesn't use SPI (sensors use I2C, flash uses QSPI), so we repurpose
 // the SERCOM for a second hardware UART.
-static Uart bleSerial(&sercom1, PIN_BLE_RX, PIN_BLE_TX,
-                       SERCOM_RX_PAD_2, UART_TX_PAD_0);
+static Uart bleSerial(&sercom1, PIN_BLE_RX, PIN_BLE_TX, SERCOM_RX_PAD_2, UART_TX_PAD_0);
 
 // SAMD51 has 4 interrupt vectors per SERCOM
 void SERCOM1_0_Handler() { bleSerial.IrqHandler(); }
@@ -27,7 +26,7 @@ bool BleManager::begin() {
     // DRDY pin already configured in initPins(), but ensure it's LOW
     digitalWrite(PIN_BLE_DRDY, LOW);
 
-    _rxLen      = 0;
+    _rxLen = 0;
     _pendingCmd = BleCommand::NONE;
     return true;
 }
@@ -63,28 +62,25 @@ void BleManager::update() {
 // ── Outbound: survey data ────────────────────────────────────────────
 void BleManager::sendSurveyData(float compass, float clino, float distance) {
     char buf[64];
-    snprintf(buf, sizeof(buf), "COMPASS:%.1f,CLINO:%.1f,DIST:%.2f\n",
-             (double)compass, (double)clino, (double)distance);
-    Serial.print(F("BLE TX: ")); Serial.print(buf);
+    snprintf(buf, sizeof(buf), "COMPASS:%.1f,CLINO:%.1f,DIST:%.2f\n", (double)compass, (double)clino,
+             (double)distance);
+    Serial.print(F("BLE TX: "));
+    Serial.print(buf);
     pulseDrdyAndSend(buf, 100);
 }
 
 // ── Outbound: keep-alive ─────────────────────────────────────────────
-void BleManager::sendKeepAlive() {
-    pulseDrdyAndSend("ALIVE\n", 50);
-}
+void BleManager::sendKeepAlive() { pulseDrdyAndSend("ALIVE\n", 50); }
 
 // ── Outbound: name change ────────────────────────────────────────────
-void BleManager::setName(const char* name) {
+void BleManager::setName(const char *name) {
     char buf[64];
     snprintf(buf, sizeof(buf), "NAME:%s\n", name);
     pulseDrdyAndSend(buf, 100);
 }
 
 // ── Inbound command access ───────────────────────────────────────────
-bool BleManager::hasCommand() const {
-    return _pendingCmd != BleCommand::NONE;
-}
+bool BleManager::hasCommand() const { return _pendingCmd != BleCommand::NONE; }
 
 BleCommand BleManager::readCommand() {
     BleCommand cmd = _pendingCmd;
@@ -93,38 +89,47 @@ BleCommand BleManager::readCommand() {
 }
 
 // ── BLE connection status ────────────────────────────────────────────
-bool BleManager::isConnected() const {
-    return digitalRead(PIN_BLE_STATUS) == HIGH;
-}
+bool BleManager::isConnected() const { return digitalRead(PIN_BLE_STATUS) == HIGH; }
 
 // ── Command name for debug printing ──────────────────────────────────
-const char* BleManager::commandName(BleCommand cmd) {
+const char *BleManager::commandName(BleCommand cmd) {
     switch (cmd) {
-        case BleCommand::NONE:         return "NONE";
-        case BleCommand::ACK_RECEIVED: return "ACK_RECEIVED";
-        case BleCommand::READY:        return "READY";
-        case BleCommand::STOP_CAL:     return "STOP_CAL";
-        case BleCommand::START_CAL:    return "START_CAL";
-        case BleCommand::DEVICE_OFF:   return "DEVICE_OFF";
-        case BleCommand::LASER_ON:     return "LASER_ON";
-        case BleCommand::LASER_OFF:    return "LASER_OFF";
-        case BleCommand::TAKE_SHOT:    return "TAKE_SHOT";
-        case BleCommand::UNKNOWN:      return "UNKNOWN";
-        default:                       return "???";
+    case BleCommand::NONE:
+        return "NONE";
+    case BleCommand::ACK_RECEIVED:
+        return "ACK_RECEIVED";
+    case BleCommand::READY:
+        return "READY";
+    case BleCommand::STOP_CAL:
+        return "STOP_CAL";
+    case BleCommand::START_CAL:
+        return "START_CAL";
+    case BleCommand::DEVICE_OFF:
+        return "DEVICE_OFF";
+    case BleCommand::LASER_ON:
+        return "LASER_ON";
+    case BleCommand::LASER_OFF:
+        return "LASER_OFF";
+    case BleCommand::TAKE_SHOT:
+        return "TAKE_SHOT";
+    case BleCommand::UNKNOWN:
+        return "UNKNOWN";
+    default:
+        return "???";
     }
 }
 
 // ── Internal: pulse DRDY and send message ────────────────────────────
-void BleManager::pulseDrdyAndSend(const char* msg, uint32_t holdMs) {
+void BleManager::pulseDrdyAndSend(const char *msg, uint32_t holdMs) {
     digitalWrite(PIN_BLE_DRDY, HIGH);
     bleSerial.print(msg);
-    bleSerial.flush();       // Wait for TX to complete
-    delay(holdMs);           // Hold DRDY for DiscoX to drain
+    bleSerial.flush(); // Wait for TX to complete
+    delay(holdMs);     // Hold DRDY for DiscoX to drain
     digitalWrite(PIN_BLE_DRDY, LOW);
 }
 
 // ── Internal: parse a complete line from DiscoX ──────────────────────
-BleCommand BleManager::parseLine(const char* line) {
+BleCommand BleManager::parseLine(const char *line) {
     // ACK acknowledgement (sent as literal string by DiscoX C++)
     if (strcmp(line, "ACK_RECEIVED") == 0) {
         return BleCommand::ACK_RECEIVED;
@@ -136,7 +141,7 @@ BleCommand BleManager::parseLine(const char* line) {
     }
 
     // Decimal command codes (e.g. "48", "54")
-    char* end;
+    char *end;
     long val = strtol(line, &end, 10);
     if (*end != '\0') {
         // Not a pure integer — unknown format
@@ -144,12 +149,19 @@ BleCommand BleManager::parseLine(const char* line) {
     }
 
     switch (val) {
-        case 0x30: return BleCommand::STOP_CAL;     // 48
-        case 0x31: return BleCommand::START_CAL;     // 49
-        case 0x34: return BleCommand::DEVICE_OFF;    // 52
-        case 0x36: return BleCommand::LASER_ON;      // 54
-        case 0x37: return BleCommand::LASER_OFF;     // 55
-        case 0x38: return BleCommand::TAKE_SHOT;     // 56
-        default:   return BleCommand::UNKNOWN;
+    case 0x30:
+        return BleCommand::STOP_CAL; // 48
+    case 0x31:
+        return BleCommand::START_CAL; // 49
+    case 0x34:
+        return BleCommand::DEVICE_OFF; // 52
+    case 0x36:
+        return BleCommand::LASER_ON; // 54
+    case 0x37:
+        return BleCommand::LASER_OFF; // 55
+    case 0x38:
+        return BleCommand::TAKE_SHOT; // 56
+    default:
+        return BleCommand::UNKNOWN;
     }
 }

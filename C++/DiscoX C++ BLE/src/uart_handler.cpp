@@ -7,29 +7,29 @@
 
 #include "uart_handler.h"
 #include "config.h"
-#include "sap6_protocol.h"
 #include "nvm_manager.h"
+#include "sap6_protocol.h"
 
 // Forward — defined in main.cpp
-extern void restartAdvertisingWithName(const String& newName);
+extern void restartAdvertisingWithName(const String &newName);
 
 // ---------------------------------------------------------------------------
 // State machine
 // ---------------------------------------------------------------------------
 enum UARTState {
-    UART_IDLE,           // waiting for DRDY HIGH
-    UART_READING,        // DRDY went HIGH, draining serial buffer
-    UART_WAIT_DRDY_LOW   // data consumed, waiting for DRDY to deassert
+    UART_IDLE,         // waiting for DRDY HIGH
+    UART_READING,      // DRDY went HIGH, draining serial buffer
+    UART_WAIT_DRDY_LOW // data consumed, waiting for DRDY to deassert
 };
 
-static UARTState  state        = UART_IDLE;
-static String     lineBuffer;
-static uint32_t   drdyRiseTime = 0;
+static UARTState state = UART_IDLE;
+static String lineBuffer;
+static uint32_t drdyRiseTime = 0;
 
 // ---------------------------------------------------------------------------
 // Line parser — mirrors code.py:96-108 (parse_uart_line) and 122-142
 // ---------------------------------------------------------------------------
-static void processLine(const String& line) {
+static void processLine(const String &line) {
     // Keep-alive from master — acknowledge but don't forward
     if (line == "ALIVE") {
         Serial.println("Keep-alive received via UART");
@@ -70,8 +70,8 @@ static void processLine(const String& line) {
         return;
     }
 
-    float compass  = line.substring(cp + 1, c1).toFloat();
-    float clino    = line.substring(ci + 1, c2).toFloat();
+    float compass = line.substring(cp + 1, c1).toFloat();
+    float clino = line.substring(ci + 1, c2).toFloat();
     float distance = line.substring(di + 1).toFloat();
 
     Serial.printf("Sending over BLE: %.2f, %.2f, %.2f\n", compass, clino, distance);
@@ -103,9 +103,7 @@ static void drainSerial() {
 // Public API
 // ---------------------------------------------------------------------------
 
-void uartInit() {
-    lineBuffer.reserve(64);
-}
+void uartInit() { lineBuffer.reserve(64); }
 
 void uartPoll() {
     switch (state) {
@@ -118,13 +116,13 @@ void uartPoll() {
                 return;
             }
             if (millis() - drdyRiseTime < DRDY_DEBOUNCE_MS) {
-                return;  // still debouncing
+                return; // still debouncing
             }
             drdyRiseTime = 0;
             state = UART_READING;
             // fall through to READING
         } else {
-            drdyRiseTime = 0;  // DRDY bounced back low
+            drdyRiseTime = 0; // DRDY bounced back low
             return;
         }
         /* FALLTHROUGH */

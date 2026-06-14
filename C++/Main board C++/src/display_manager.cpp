@@ -2,31 +2,31 @@
 
 // ── Layout constants (match Python display_manager.py positions) ────
 // Battery icon — top-right
-static constexpr int16_t BAT_X      = 90;
-static constexpr int16_t BAT_Y      = 0;
-static constexpr int16_t BAT_W      = 32;
-static constexpr int16_t BAT_H      = 15;
-static constexpr int16_t BAT_TIP_W  = 3;
-static constexpr int16_t BAT_TIP_H  = 6;
+static constexpr int16_t BAT_X = 90;
+static constexpr int16_t BAT_Y = 0;
+static constexpr int16_t BAT_W = 32;
+static constexpr int16_t BAT_H = 15;
+static constexpr int16_t BAT_TIP_W = 3;
+static constexpr int16_t BAT_TIP_H = 6;
 static constexpr int16_t BAT_FILL_X = BAT_X + 1;
 static constexpr int16_t BAT_FILL_Y = BAT_Y + 1;
 static constexpr int16_t BAT_FILL_W = 30;
 static constexpr int16_t BAT_FILL_H = 13;
 
 // BT label — top-left (text size 2)
-static constexpr int16_t BT_X       = 0;
-static constexpr int16_t BT_Y       = 0;
-static constexpr int16_t BT_NUM_X   = 30;
+static constexpr int16_t BT_X = 0;
+static constexpr int16_t BT_Y = 0;
+static constexpr int16_t BT_NUM_X = 30;
 
 // Data lines — text size 3
-static constexpr int16_t DIST_Y     = 34;
-static constexpr int16_t AZ_Y       = 68;
-static constexpr int16_t INC_Y      = 100;
+static constexpr int16_t DIST_Y = 34;
+static constexpr int16_t AZ_Y = 68;
+static constexpr int16_t INC_Y = 100;
 
 // Degree symbol drawn as a small circle (looks better than CP437 '\xF8' at size 3)
-static constexpr int16_t DEG_RADIUS  = 3;
-static constexpr int16_t DEG_OFFSET_X = 2;   // gap after text
-static constexpr int16_t DEG_OFFSET_Y = 3;   // down from top of text line
+static constexpr int16_t DEG_RADIUS = 3;
+static constexpr int16_t DEG_OFFSET_X = 2; // gap after text
+static constexpr int16_t DEG_OFFSET_Y = 3; // down from top of text line
 
 // ── Public API ─────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ bool DisplayManager::begin() {
     if (!_display.begin(SH1107_ADDR, true)) {
         return false;
     }
-    _display.setRotation(2);          // 180 deg to match Python layout
+    _display.setRotation(2); // 180 deg to match Python layout
     _display.clearDisplay();
     _display.display();
     _initialized = true;
@@ -42,67 +42,62 @@ bool DisplayManager::begin() {
 }
 
 void DisplayManager::setBrightness(uint8_t level) {
-    if (!_initialized) return;
+    if (!_initialized) {
+        return;
+    }
     _display.setContrast(level);
 }
 
 void DisplayManager::initScreen() {
-    if (!_initialized) return;
+    if (!_initialized) {
+        return;
+    }
     drawMainScreen();
     _display.display();
 }
 
-void DisplayManager::updateSensorReadings(float distance, float azimuth,
-                                           float inclination) {
-    _distance    = distance;
-    _distIsText  = false;
-    _azimuth     = azimuth;
+void DisplayManager::updateSensorReadings(float distance, float azimuth, float inclination) {
+    _distance = distance;
+    _distIsText = false;
+    _azimuth = azimuth;
     _inclination = inclination;
 }
 
 void DisplayManager::updateDistance(float distance) {
-    _distance   = distance;
+    _distance = distance;
     _distIsText = false;
 }
 
-void DisplayManager::updateDistanceText(const char* text) {
+void DisplayManager::updateDistanceText(const char *text) {
     strncpy(_distText, text, sizeof(_distText) - 1);
     _distText[sizeof(_distText) - 1] = '\0';
     _distIsText = true;
 }
 
-void DisplayManager::updateAzimuth(float azimuth) {
-    _azimuth = azimuth;
-}
+void DisplayManager::updateAzimuth(float azimuth) { _azimuth = azimuth; }
 
-void DisplayManager::updateInclination(float inclination) {
-    _inclination = inclination;
-}
+void DisplayManager::updateInclination(float inclination) { _inclination = inclination; }
 
-void DisplayManager::updateBattery(float percentage) {
-    _battery = constrain(percentage, 0.0f, 100.0f);
-}
+void DisplayManager::updateBattery(float percentage) { _battery = constrain(percentage, 0.0f, 100.0f); }
 
-void DisplayManager::updateBTLabel(bool connected) {
-    _btConnected = connected;
-}
+void DisplayManager::updateBTLabel(bool connected) { _btConnected = connected; }
 
-void DisplayManager::updateBTNumber(uint16_t pending) {
-    _btPending = pending;
-}
+void DisplayManager::updateBTNumber(uint16_t pending) { _btPending = pending; }
 
-void DisplayManager::updateMeasureFrom(bool front) {
-    _measureFromFront = front;
-}
+void DisplayManager::updateMeasureFrom(bool front) { _measureFromFront = front; }
 
 void DisplayManager::blankScreen() {
-    if (!_initialized) return;
+    if (!_initialized) {
+        return;
+    }
     _display.clearDisplay();
     _display.display();
 }
 
 void DisplayManager::showStartingMenu() {
-    if (!_initialized) return;
+    if (!_initialized) {
+        return;
+    }
     _display.clearDisplay();
     _display.setTextSize(1);
     _display.setTextColor(SH110X_WHITE);
@@ -119,7 +114,9 @@ void DisplayManager::showStartingMenu() {
 }
 
 void DisplayManager::showInitialisingMessage() {
-    if (!_initialized) return;
+    if (!_initialized) {
+        return;
+    }
     _display.clearDisplay();
     _display.setTextSize(1);
     _display.setTextColor(SH110X_WHITE);
@@ -129,8 +126,10 @@ void DisplayManager::showInitialisingMessage() {
     _display.display();
 }
 
-void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
-    if (!_initialized) return;
+void DisplayManager::showSplash(bool laserOn, const char *nameSuffix) {
+    if (!_initialized) {
+        return;
+    }
 
     _display.clearDisplay();
     _display.setTextColor(SH110X_WHITE);
@@ -145,12 +144,12 @@ void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
     // the centre) with relatively straight vertical sides and rounded
     // corners.  We trace the outline by computing the top-edge Y and
     // bottom-edge Y as functions of X.
-    static constexpr int16_t BODY_CX  = 46;   // centre X of body
-    static constexpr int16_t BODY_CY  = 64;   // centre Y of body
-    static constexpr int16_t BODY_HW  = 40;   // half-width
-    static constexpr int16_t BODY_HH  = 20;   // half-height at the sides
-    static constexpr int16_t SCOOP    = 6;     // how far top/bottom edges dip inward
-    static constexpr int16_t CORNER_R = 8;     // visual corner rounding zone
+    static constexpr int16_t BODY_CX = 46; // centre X of body
+    static constexpr int16_t BODY_CY = 64; // centre Y of body
+    static constexpr int16_t BODY_HW = 40; // half-width
+    static constexpr int16_t BODY_HH = 20; // half-height at the sides
+    static constexpr int16_t SCOOP = 6;    // how far top/bottom edges dip inward
+    static constexpr int16_t CORNER_R = 8; // visual corner rounding zone
 
     // Given an X position, return the half-height of the body at that X.
     // Two smooth dips with sharp pointed cusps where the curves meet
@@ -166,8 +165,8 @@ void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
         int16_t prevTy = -1, prevBy = -1;
         for (int16_t x = BODY_CX - BODY_HW; x <= BODY_CX + BODY_HW; x++) {
             float hh = bodyHH(x) - inset;
-            int16_t ty = BODY_CY - (int16_t)hh;   // top edge Y
-            int16_t by = BODY_CY + (int16_t)hh;   // bottom edge Y
+            int16_t ty = BODY_CY - (int16_t)hh; // top edge Y
+            int16_t by = BODY_CY + (int16_t)hh; // bottom edge Y
 
             // Draw top and bottom edge pixels
             _display.drawPixel(x, ty, SH110X_WHITE);
@@ -180,8 +179,12 @@ void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
 
             // Connect to previous column to fill gaps in the curve
             if (prevTy >= 0) {
-                if (ty != prevTy) _display.drawLine(x-1, min(ty,prevTy), x, max(ty,prevTy), SH110X_WHITE);
-                if (by != prevBy) _display.drawLine(x-1, min(by,prevBy), x, max(by,prevBy), SH110X_WHITE);
+                if (ty != prevTy) {
+                    _display.drawLine(x - 1, min(ty, prevTy), x, max(ty, prevTy), SH110X_WHITE);
+                }
+                if (by != prevBy) {
+                    _display.drawLine(x - 1, min(by, prevBy), x, max(by, prevBy), SH110X_WHITE);
+                }
             }
             prevTy = ty;
             prevBy = by;
@@ -190,9 +193,9 @@ void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
 
     // ── 4 button squares (no surrounding frame) ──────────────────
     static constexpr int16_t BTN_SIZE = 8;
-    static constexpr int16_t BTN_GAP  = 2;
-    static constexpr int16_t BTN_X0   = BODY_CX - BODY_HW + 8;
-    static constexpr int16_t BTN_Y0   = BODY_CY - BTN_SIZE / 2;
+    static constexpr int16_t BTN_GAP = 2;
+    static constexpr int16_t BTN_X0 = BODY_CX - BODY_HW + 8;
+    static constexpr int16_t BTN_Y0 = BODY_CY - BTN_SIZE / 2;
 
     for (int i = 0; i < 4; i++) {
         int16_t bx = BTN_X0 + i * (BTN_SIZE + BTN_GAP);
@@ -208,13 +211,13 @@ void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
     _display.drawRoundRect(DSQ_X, DSQ_Y, DSQ_W, DSQ_H, 4, SH110X_WHITE);
 
     // ── Laser beam — flashing on/off as the device loads ──────────
-    static constexpr int16_t BEAM_Y   = BODY_CY;
-    static constexpr int16_t BEAM_X0  = BODY_CX + BODY_HW + 2;
-    static constexpr int16_t BEAM_X1  = 112;
+    static constexpr int16_t BEAM_Y = BODY_CY;
+    static constexpr int16_t BEAM_X0 = BODY_CX + BODY_HW + 2;
+    static constexpr int16_t BEAM_X1 = 112;
 
     if (laserOn) {
         // Main beam (2px thick)
-        _display.drawLine(BEAM_X0, BEAM_Y,     BEAM_X1, BEAM_Y,     SH110X_WHITE);
+        _display.drawLine(BEAM_X0, BEAM_Y, BEAM_X1, BEAM_Y, SH110X_WHITE);
         _display.drawLine(BEAM_X0, BEAM_Y - 1, BEAM_X1, BEAM_Y - 1, SH110X_WHITE);
 
         // Starburst at the tip
@@ -222,10 +225,8 @@ void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
         static constexpr int16_t STAR_CY = BEAM_Y;
         static constexpr int16_t RAY_LEN = 8;
 
-        static constexpr float RAY_ANGLES[] = {
-            0.0f, 0.7854f, 1.5708f, 2.3562f,
-            3.1416f, 3.9270f, 4.7124f, 5.4978f
-        };
+        static constexpr float RAY_ANGLES[] = {0.0f,    0.7854f, 1.5708f, 2.3562f,
+                                               3.1416f, 3.9270f, 4.7124f, 5.4978f};
         for (float a : RAY_ANGLES) {
             int16_t ex = STAR_CX + (int16_t)(cosf(a) * RAY_LEN);
             int16_t ey = STAR_CY + (int16_t)(sinf(a) * RAY_LEN);
@@ -247,7 +248,9 @@ void DisplayManager::showSplash(bool laserOn, const char* nameSuffix) {
 }
 
 void DisplayManager::refresh() {
-    if (!_initialized) return;
+    if (!_initialized) {
+        return;
+    }
     drawMainScreen();
     _display.display();
 }
@@ -307,7 +310,7 @@ void DisplayManager::drawMainScreen() {
 void DisplayManager::drawDegreeSymbol(int16_t y) {
     int16_t cx = _display.getCursorX() + DEG_OFFSET_X + DEG_RADIUS;
     int16_t cy = y + DEG_OFFSET_Y + DEG_RADIUS;
-    _display.drawCircle(cx, cy, DEG_RADIUS,     SH110X_WHITE);
+    _display.drawCircle(cx, cy, DEG_RADIUS, SH110X_WHITE);
     _display.drawCircle(cx, cy, DEG_RADIUS - 1, SH110X_WHITE);
 }
 
@@ -316,13 +319,11 @@ void DisplayManager::drawBattery(float pct) {
     _display.drawRect(BAT_X, BAT_Y, BAT_W, BAT_H, SH110X_WHITE);
 
     // Positive terminal tip
-    _display.fillRect(BAT_X + BAT_W, BAT_Y + (BAT_H - BAT_TIP_H) / 2,
-                      BAT_TIP_W, BAT_TIP_H, SH110X_WHITE);
+    _display.fillRect(BAT_X + BAT_W, BAT_Y + (BAT_H - BAT_TIP_H) / 2, BAT_TIP_W, BAT_TIP_H, SH110X_WHITE);
 
     // Fill proportional to charge level
     int16_t fillW = (int16_t)((pct / 100.0f) * BAT_FILL_W);
     if (fillW > 0) {
-        _display.fillRect(BAT_FILL_X, BAT_FILL_Y,
-                          fillW, BAT_FILL_H, SH110X_WHITE);
+        _display.fillRect(BAT_FILL_X, BAT_FILL_Y, fillW, BAT_FILL_H, SH110X_WHITE);
     }
 }

@@ -12,9 +12,7 @@
 
 using namespace Adafruit_LittleFS_Namespace;
 
-void nvmInit() {
-    InternalFS.begin();
-}
+void nvmInit() { InternalFS.begin(); }
 
 String nvmReadName() {
     File f = InternalFS.open(NVM_FILENAME, FILE_O_READ);
@@ -45,7 +43,7 @@ String nvmReadName() {
     return String(buf);
 }
 
-bool nvmWriteName(const String& name) {
+bool nvmWriteName(const String &name) {
     if (name.length() < 1 || name.length() > MAX_NAME_LEN) {
         return false;
     }
@@ -58,7 +56,7 @@ bool nvmWriteName(const String& name) {
         return false;
     }
 
-    uint8_t header[2] = { NVM_MAGIC, (uint8_t)name.length() };
+    uint8_t header[2] = {NVM_MAGIC, (uint8_t)name.length()};
     f.write(header, 2);
     f.write(name.c_str(), name.length());
     f.close();

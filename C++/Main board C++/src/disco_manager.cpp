@@ -5,7 +5,7 @@
 
 void DiscoManager::begin() {
     pixel_.begin();
-    pixel_.setBrightness(255);   // HW brightness max; we software-scale
+    pixel_.setBrightness(255); // HW brightness max; we software-scale
     pixel_.show();
 }
 
@@ -16,8 +16,7 @@ void DiscoManager::update(float accelX, float accelY, float accelZ) {
 
     if (effect_ == DiscoEffect::DISCO) {
         // --- Shake detection for wild mode ---
-        if (fabsf(accelX) > Disco::SHAKE_THRESHOLD ||
-            fabsf(accelY) > Disco::SHAKE_THRESHOLD ||
+        if (fabsf(accelX) > Disco::SHAKE_THRESHOLD || fabsf(accelY) > Disco::SHAKE_THRESHOLD ||
             fabsf(accelZ) > Disco::SHAKE_THRESHOLD) {
             wildLatched_ = true;
             lastShakeTime_ = now;
@@ -94,27 +93,27 @@ void DiscoManager::setWhite() {
     setPixel(255, 255, 255);
 }
 
-void DiscoManager::turnOff() {
-    stopAll();
-}
+void DiscoManager::turnOff() { stopAll(); }
 
 // ── Animated effects ────────────────────────────────────────────────
 
 void DiscoManager::startDisco() {
-    if (effect_ == DiscoEffect::DISCO) return;   // already running
+    if (effect_ == DiscoEffect::DISCO) {
+        return; // already running
+    }
     stopAll();
-    effect_        = DiscoEffect::DISCO;
-    brightness_    = Disco::BASE_BRIGHTNESS;
-    wildLatched_   = false;
+    effect_ = DiscoEffect::DISCO;
+    brightness_ = Disco::BASE_BRIGHTNESS;
+    wildLatched_ = false;
     lastShakeTime_ = 0;
-    hueStep_       = 0;
+    hueStep_ = 0;
     lastFrameTime_ = millis();
 }
 
 void DiscoManager::setPurple() {
     stopAll();
-    effect_        = DiscoEffect::PURPLE_PULSE;
-    pulsePhase_    = 0.0f;
+    effect_ = DiscoEffect::PURPLE_PULSE;
+    pulsePhase_ = 0.0f;
     lastPulseTime_ = millis();
 }
 
@@ -137,8 +136,7 @@ void DiscoManager::setPixel(uint8_t r, uint8_t g, uint8_t b) {
     pixel_.show();
 }
 
-void DiscoManager::hsvToRgb(float h, float s, float v,
-                             uint8_t& r, uint8_t& g, uint8_t& b) {
+void DiscoManager::hsvToRgb(float h, float s, float v, uint8_t &r, uint8_t &g, uint8_t &b) {
     // Identical algorithm to Python's DiscoMode.hsv_to_rgb
     int i = (int)(h * 6.0f);
     float f = h * 6.0f - i;
@@ -148,12 +146,36 @@ void DiscoManager::hsvToRgb(float h, float s, float v,
     i = i % 6;
     float rv, gv, bv;
     switch (i) {
-        case 0: rv = v; gv = t; bv = p; break;
-        case 1: rv = q; gv = v; bv = p; break;
-        case 2: rv = p; gv = v; bv = t; break;
-        case 3: rv = p; gv = q; bv = v; break;
-        case 4: rv = t; gv = p; bv = v; break;
-        default: rv = v; gv = p; bv = q; break;   // case 5
+    case 0:
+        rv = v;
+        gv = t;
+        bv = p;
+        break;
+    case 1:
+        rv = q;
+        gv = v;
+        bv = p;
+        break;
+    case 2:
+        rv = p;
+        gv = v;
+        bv = t;
+        break;
+    case 3:
+        rv = p;
+        gv = q;
+        bv = v;
+        break;
+    case 4:
+        rv = t;
+        gv = p;
+        bv = v;
+        break;
+    default:
+        rv = v;
+        gv = p;
+        bv = q;
+        break; // case 5
     }
     r = (uint8_t)(rv * 255.0f);
     g = (uint8_t)(gv * 255.0f);

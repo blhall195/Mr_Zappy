@@ -8,4 +8,4 @@ void nvmInit();
 String nvmReadName();
 
 // Write a new device name (1..MAX_NAME_LEN chars). Returns true on success.
-bool nvmWriteName(const String& name);
+bool nvmWriteName(const String &name);

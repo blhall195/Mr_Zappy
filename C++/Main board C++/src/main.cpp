@@ -1,23 +1,23 @@
-#include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_ISM330DHCX.h>
-#include <Adafruit_MAX1704X.h>
-#include "config.h"
-#include "device_context.h"
+#include "ble_manager.h"
 #include "button_manager.h"
-#include "rm3100.h"
+#include "calibration_mode.h"
+#include "config.h"
+#include "config_manager.h"
+#include "device_context.h"
+#include "disco_manager.h"
 #include "display_manager.h"
 #include "laser_egismos.h"
-#include "ble_manager.h"
 #include "mag_cal/calibration.h"
-#include "sensor_manager.h"
-#include "config_manager.h"
-#include "disco_manager.h"
 #include "menu_manager.h"
-#include "calibration_mode.h"
+#include "rm3100.h"
+#include "sensor_manager.h"
 #include "snake_game.h"
-#include <Adafruit_TinyUSB.h>
+#include <Adafruit_ISM330DHCX.h>
+#include <Adafruit_MAX1704X.h>
 #include <Adafruit_SPIFlash.h>
+#include <Adafruit_TinyUSB.h>
+#include <Arduino.h>
+#include <Wire.h>
 
 // ── Embedded calibration data ──────────────────────────────────────
 // From Main board/calibration_dict.json — loaded at startup
@@ -53,49 +53,56 @@ static const char CALIBRATION_JSON[] PROGMEM = R"({
 // the reset the IC keeps tracking SOC across reboots (it still PORs on
 // its own if battery power is lost).
 class MAX17048_Persistent : public Adafruit_MAX17048 {
-public:
+  public:
     bool begin(TwoWire *wire = &Wire) {
-        if (i2c_dev) { delete i2c_dev; delete status_reg; }
+        if (i2c_dev) {
+            delete i2c_dev;
+            delete status_reg;
+        }
         i2c_dev = new Adafruit_I2CDevice(MAX17048_I2CADDR_DEFAULT, wire);
-        if (!i2c_dev->begin())   return false;
-        if (!isDeviceReady())    return false;
+        if (!i2c_dev->begin()) {
+            return false;
+        }
+        if (!isDeviceReady()) {
+            return false;
+        }
         status_reg = new Adafruit_BusIO_Register(i2c_dev, MAX1704X_STATUS_REG);
         // No reset() — preserve ModelGauge tracking state
         enableSleep(false);
         sleep(false);
-        wake();   // exit hibernation if the IC entered it
+        wake(); // exit hibernation if the IC entered it
         return true;
     }
 };
 
 // ── Global state ────────────────────────────────────────────────────
-DeviceContext       ctx;
-ButtonManager       buttons;
-RM3100              mag;
+DeviceContext ctx;
+ButtonManager buttons;
+RM3100 mag;
 Adafruit_ISM330DHCX imu;
 MAX17048_Persistent battery;
-DisplayManager      display;
-LaserEgismos        laser;
-BleManager          ble;
+DisplayManager display;
+LaserEgismos laser;
+BleManager ble;
 MagCal::Calibration calibration;
-SensorManager       sensorMgr;
-ConfigManager       configMgr;
-DiscoManager        disco;
-MenuManager         menuMgr;
-CalibrationMode     calMode;
-SnakeGame           snakeGame;
-Adafruit_USBD_MSC   usbMsc;
+SensorManager sensorMgr;
+ConfigManager configMgr;
+DiscoManager disco;
+MenuManager menuMgr;
+CalibrationMode calMode;
+SnakeGame snakeGame;
+Adafruit_USBD_MSC usbMsc;
 
-bool magOk   = false;
-bool imuOk   = false;
-bool batOk   = false;
-bool dispOk  = false;
+bool magOk = false;
+bool imuOk = false;
+bool batOk = false;
+bool dispOk = false;
 bool laserOk = false;
-bool bleOk   = false;
-bool calOk   = false;
-bool calFromFlash = false;  // true = loaded from QSPI, false = PROGMEM fallback
+bool bleOk = false;
+bool calOk = false;
+bool calFromFlash = false; // true = loaded from QSPI, false = PROGMEM fallback
 bool flashOk = false;
-static bool enterMenuMode  = false;
+static bool enterMenuMode = false;
 static bool enterCalibMode = false;
 static bool enterSnakeMode = false;
 
@@ -109,42 +116,42 @@ static float lastDistance = 0;
 // ── Boot-time field strength sanity check ────────────────────────────
 // After N sensor readings, compare calibrated field strength to expected.
 // Catches stale calibration AND sensor remagnetization.
-static constexpr uint8_t  FIELD_CHECK_AFTER_SAMPLES = 20;  // let EMA settle
-static constexpr float    FIELD_CHECK_TOLERANCE     = 0.15f; // 15%
-static uint8_t  fieldCheckCounter = 0;
-static bool     fieldCheckDone    = false;
+static constexpr uint8_t FIELD_CHECK_AFTER_SAMPLES = 20; // let EMA settle
+static constexpr float FIELD_CHECK_TOLERANCE = 0.15f;    // 15%
+static uint8_t fieldCheckCounter = 0;
+static bool fieldCheckDone = false;
 
 // ── Display deadband (prevents ±0.1 flicker when stationary) ────────
-static float dispAz   = 0.0f;   // currently displayed azimuth
-static float dispInc  = 0.0f;   // currently displayed inclination
-static constexpr float DEADBAND_ANGLE = 0.15f;  // degrees
-static uint32_t gyroStillSince = 0;  // millis() when gyro first dropped below threshold
-static float anchorAz  = 0.0f;  // azimuth when gyro settled — display clamped to ±0.1°
-static float anchorInc = 0.0f;  // inclination when gyro settled
-static bool  anchored  = false;  // true once settle period has elapsed
+static float dispAz = 0.0f;                    // currently displayed azimuth
+static float dispInc = 0.0f;                   // currently displayed inclination
+static constexpr float DEADBAND_ANGLE = 0.15f; // degrees
+static uint32_t gyroStillSince = 0;            // millis() when gyro first dropped below threshold
+static float anchorAz = 0.0f;                  // azimuth when gyro settled — display clamped to ±0.1°
+static float anchorInc = 0.0f;                 // inclination when gyro settled
+static bool anchored = false;                  // true once settle period has elapsed
 
 // ── Timing statics ──────────────────────────────────────────────────
-static uint32_t lastSensorUpdate    = 0;
-static uint32_t lastBatRead         = 0;
-static float    lastBatPct          = 0.0f;
-static uint32_t lastDisplayRefresh  = 0;
-static uint32_t lastBleCheck        = 0;
-static uint32_t lastBleUartPoll     = 0;
-static uint32_t lastAutoShutCheck   = 0;
-static uint32_t lastLaserTimeCheck  = 0;
+static uint32_t lastSensorUpdate = 0;
+static uint32_t lastBatRead = 0;
+static float lastBatPct = 0.0f;
+static uint32_t lastDisplayRefresh = 0;
+static uint32_t lastBleCheck = 0;
+static uint32_t lastBleUartPoll = 0;
+static uint32_t lastAutoShutCheck = 0;
+static uint32_t lastLaserTimeCheck = 0;
 
 // ── BLE startup name sync retry ────────────────────────────────────
-static uint32_t bleNameSyncStartMs      = 0;
-static uint32_t bleNameSyncLastSendMs   = 0;
-static uint8_t  bleNameSyncAttempts     = 0;
-static bool     bleNameSyncDone         = false;
-static bool     bleReadySeen            = false;
-static bool     bleNameSentAfterReady   = false;
+static uint32_t bleNameSyncStartMs = 0;
+static uint32_t bleNameSyncLastSendMs = 0;
+static uint8_t bleNameSyncAttempts = 0;
+static bool bleNameSyncDone = false;
+static bool bleReadySeen = false;
+static bool bleNameSentAfterReady = false;
 
 // ── Button hold detection ───────────────────────────────────────────
-static uint32_t discoHoldStart   = 0;
-static bool     discoHolding     = false;
-static bool     discoTriggered   = false;  // true once disco toggled during this hold
+static uint32_t discoHoldStart = 0;
+static bool discoHolding = false;
+static bool discoTriggered = false; // true once disco toggled during this hold
 
 // ── Measurement state ───────────────────────────────────────────────
 static bool measRedLedSet = false;
@@ -181,32 +188,28 @@ static void updateDisplay(uint32_t now);
 
 // ── Forward declarations — helpers ──────────────────────────────────
 static void handleMeasurementSuccess();
-static void alertError(const char* errCode);
+static void alertError(const char *errCode);
 static void resetLaser();
 static void doShutdown();
 static float circularDiff(float a, float b);
-static bool bearingsWithinTol(const float* vals, uint8_t n, float tol);
-static bool linearWithinTol(const float* vals, uint8_t n, float tol);
+static bool bearingsWithinTol(const float *vals, uint8_t n, float tol);
+static bool linearWithinTol(const float *vals, uint8_t n, float tol);
 static void onFlushReading(float az, float inc, float dist);
-static void enterUsbDriveMode();  // USB MSC loop (does not return)
+static void enterUsbDriveMode(); // USB MSC loop (does not return)
 
 // ── USB MSC block-level callbacks ───────────────────────────────────
 // Defined here (before setup) so the early USB drive mode check can use them.
-static Adafruit_SPIFlash* s_mscFlash = nullptr;
+static Adafruit_SPIFlash *s_mscFlash = nullptr;
 
-static int32_t msc_read_cb(uint32_t lba, void* buffer, uint32_t bufsize) {
-    return s_mscFlash->readBlocks(lba, (uint8_t*)buffer, bufsize / 512)
-           ? (int32_t)bufsize : -1;
+static int32_t msc_read_cb(uint32_t lba, void *buffer, uint32_t bufsize) {
+    return s_mscFlash->readBlocks(lba, (uint8_t *)buffer, bufsize / 512) ? (int32_t)bufsize : -1;
 }
 
-static int32_t msc_write_cb(uint32_t lba, uint8_t* buffer, uint32_t bufsize) {
-    return s_mscFlash->writeBlocks(lba, buffer, bufsize / 512)
-           ? (int32_t)bufsize : -1;
+static int32_t msc_write_cb(uint32_t lba, uint8_t *buffer, uint32_t bufsize) {
+    return s_mscFlash->writeBlocks(lba, buffer, bufsize / 512) ? (int32_t)bufsize : -1;
 }
 
-static void msc_flush_cb() {
-    s_mscFlash->syncBlocks();
-}
+static void msc_flush_cb() { s_mscFlash->syncBlocks(); }
 
 // ═══════════════════════════════════════════════════════════════════
 // ── Setup ─────────────────────────────────────────────────────────
@@ -223,8 +226,8 @@ void setup() {
 
     // Configure button pull-ups BEFORE reading them
     pinMode(PIN_BTN_MEASURE, INPUT_PULLUP);
-    pinMode(PIN_BTN_FIRE,    INPUT_PULLUP);
-    delayMicroseconds(50);  // let pull-ups settle before reading
+    pinMode(PIN_BTN_FIRE, INPUT_PULLUP);
+    delayMicroseconds(50); // let pull-ups settle before reading
 
     // ── Early USB drive mode check ─────────────────────────────────
     // Must happen BEFORE Serial.begin() so MSC is part of the initial
@@ -235,15 +238,17 @@ void setup() {
     // write, so it still works when the filesystem is full/unwritable —
     // this is the recovery route to let a host PC reformat the drive.
     {
-        bool earlyFlash  = configMgr.begin();  // safe before Serial — prints are no-ops
-        bool usbByFlag   = earlyFlash && configMgr.hasFlag("usb_drive");
+        bool earlyFlash = configMgr.begin(); // safe before Serial — prints are no-ops
+        bool usbByFlag = earlyFlash && configMgr.hasFlag("usb_drive");
         bool usbByButton = (digitalRead(PIN_BTN_FIRE) == LOW);
         if (usbByFlag || usbByButton) {
-            if (usbByFlag) configMgr.clearFlag("usb_drive");
+            if (usbByFlag) {
+                configMgr.clearFlag("usb_drive");
+            }
 
             // Show transitional message while USB stack initialises
             if (dispOk) {
-                auto& d = display.getDisplay();
+                auto &d = display.getDisplay();
                 d.clearDisplay();
                 d.setTextSize(1);
                 d.setTextColor(SH110X_WHITE);
@@ -267,7 +272,7 @@ void setup() {
 
             // Show final instructions
             if (dispOk) {
-                auto& d = display.getDisplay();
+                auto &d = display.getDisplay();
                 d.clearDisplay();
                 d.setTextSize(1);
                 d.setTextColor(SH110X_WHITE);
@@ -285,7 +290,9 @@ void setup() {
             }
 
             // Spin forever — device stays in USB drive mode until power cycled
-            while (true) { delay(100); }
+            while (true) {
+                delay(100);
+            }
             // Does not return
         }
     }
@@ -295,8 +302,9 @@ void setup() {
     display.showSplash(false);
 
     Serial.begin(115200);
-    if (digitalRead(PIN_BTN_MEASURE) == LOW) {   // hold MEASURE for serial debug
-        while (!Serial && millis() < 3000) { }
+    if (digitalRead(PIN_BTN_MEASURE) == LOW) { // hold MEASURE for serial debug
+        while (!Serial && millis() < 3000) {
+        }
         Serial.println(F("I2C bus scan:"));
         scanI2C();
         Serial.println();
@@ -312,7 +320,7 @@ void setup() {
     // ── Sensors ──
     magOk = mag.begin(Wire, RM3100_I2C_ADDR, RM3100_CYCLE_COUNT, PIN_MAG_DRDY);
     if (magOk) {
-        mag.startSingleReading();  // kick off first non-blocking read
+        mag.startSingleReading(); // kick off first non-blocking read
     }
     Serial.print(F("RM3100:      "));
     Serial.println(magOk ? F("OK") : F("FAILED"));
@@ -329,16 +337,21 @@ void setup() {
 
     batOk = battery.begin(&Wire);
     if (batOk) {
-        delay(100);  // let SOC register update after wake
+        delay(100); // let SOC register update after wake
         lastBatPct = battery.cellPercent();
         lastBatRead = millis();
     }
     Serial.print(F("MAX17048:    "));
     Serial.println(batOk ? F("OK") : F("FAILED"));
     if (batOk) {
-        Serial.print(F("  Voltage:   ")); Serial.print(battery.cellVoltage(), 3); Serial.println(F(" V"));
-        Serial.print(F("  SOC:       ")); Serial.print(lastBatPct, 1); Serial.println(F(" %"));
-        Serial.print(F("  Hibernate: ")); Serial.println(battery.isHibernating() ? F("yes") : F("no"));
+        Serial.print(F("  Voltage:   "));
+        Serial.print(battery.cellVoltage(), 3);
+        Serial.println(F(" V"));
+        Serial.print(F("  SOC:       "));
+        Serial.print(lastBatPct, 1);
+        Serial.println(F(" %"));
+        Serial.print(F("  Hibernate: "));
+        Serial.println(battery.isHibernating() ? F("yes") : F("no"));
     }
     Serial.println();
 
@@ -348,7 +361,7 @@ void setup() {
 
     // Warn user if flash was auto-reformatted (all saved data lost)
     if (flashOk && configMgr.wasReformatted() && dispOk) {
-        auto& disp = display.getDisplay();
+        auto &disp = display.getDisplay();
         display.blankScreen();
         disp.setTextColor(SH110X_WHITE);
         disp.setTextSize(2);
@@ -373,14 +386,22 @@ void setup() {
     {
         auto splashLaser = [&]() -> bool {
             uint32_t t = millis() - splashStart;
-            if (t < 200)  return false;  // off  200ms
-            if (t < 500)  return true;   // on   300ms
-            if (t < 700)  return false;  // off  200ms
-            return true;                 // on   750ms (final hold)
+            if (t < 200) {
+                return false; // off  200ms
+            }
+            if (t < 500) {
+                return true; // on   300ms
+            }
+            if (t < 700) {
+                return false; // off  200ms
+            }
+            return true; // on   750ms (final hold)
         };
         // Extract suffix after '_' from BLE name for splash display
-        const char* nameSuffix = strchr(ctx.config.bleName, '_');
-        if (nameSuffix) nameSuffix++;   // skip the '_'
+        const char *nameSuffix = strchr(ctx.config.bleName, '_');
+        if (nameSuffix) {
+            nameSuffix++; // skip the '_'
+        }
 
         while (millis() - splashStart < 1450) {
             display.showSplash(splashLaser(), nameSuffix);
@@ -397,7 +418,7 @@ void setup() {
     // ── Startup: turn laser on with beep ───────────────────────────
     if (laserOk) {
         laser.setLaser(true);
-        laser.setBuzzer(true);   // startup beep
+        laser.setBuzzer(true); // startup beep
         laser.setBuzzer(false);
         ctx.laserEnabled = true;
     }
@@ -441,13 +462,14 @@ void setup() {
 
     // Enter calibration mode if flag was set
     if (enterCalibMode && magOk && imuOk && dispOk && laserOk) {
-        calMode.begin(buttons, display, disco, laser, mag, imu,
-                      configMgr, calibration, ctx.config);
+        calMode.begin(buttons, display, disco, laser, mag, imu, configMgr, calibration, ctx.config);
     }
 
     // Enter snake mode if flag was set
     if (enterSnakeMode && dispOk) {
-        if (laserOk) laser.setLaser(false);
+        if (laserOk) {
+            laser.setLaser(false);
+        }
         snakeGame.begin(display.getDisplay(), buttons, disco);
     }
 
@@ -514,15 +536,15 @@ void loop() {
         menuMgr.exitAction() == MenuExitAction::ENTER_PART2_CALIB ||
         menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB) {
         CalMode cm = CalMode::PART1_ELLIPSOID;
-        if (menuMgr.exitAction() == MenuExitAction::ENTER_PART2_CALIB)
+        if (menuMgr.exitAction() == MenuExitAction::ENTER_PART2_CALIB) {
             cm = CalMode::PART2_ALIGNMENT;
-        else if (menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB)
+        } else if (menuMgr.exitAction() == MenuExitAction::ENTER_SHORT_CALIB) {
             cm = CalMode::SHORT;
+        }
         menuMgr.clearExitAction();
         if (magOk && imuOk && dispOk && laserOk) {
             Serial.println(F("Transitioning: menu → calibration"));
-            calMode.begin(buttons, display, disco, laser, mag, imu,
-                          configMgr, calibration, ctx.config, cm);
+            calMode.begin(buttons, display, disco, laser, mag, imu, configMgr, calibration, ctx.config, cm);
         } else {
             Serial.println(F("Cannot enter calibration — sensors not ready"));
             display.initScreen();
@@ -535,8 +557,8 @@ void loop() {
         menuMgr.clearExitAction();
         if (magOk && imuOk && dispOk && laserOk && calOk) {
             Serial.println(F("Transitioning: menu → F/B field check"));
-            calMode.beginFBCheck(buttons, display, disco, laser, mag, imu,
-                                 configMgr, calibration, ctx.config);
+            calMode.beginFBCheck(buttons, display, disco, laser, mag, imu, configMgr, calibration,
+                                 ctx.config);
         } else {
             Serial.println(F("Cannot enter F/B check — sensors/calibration not ready"));
             display.initScreen();
@@ -549,7 +571,9 @@ void loop() {
         menuMgr.clearExitAction();
         if (dispOk) {
             Serial.println(F("Transitioning: menu → snake game"));
-            if (laserOk) laser.setLaser(false);
+            if (laserOk) {
+                laser.setLaser(false);
+            }
             ctx.laserEnabled = false;
             snakeGame.begin(display.getDisplay(), buttons, disco);
         }
@@ -560,7 +584,7 @@ void loop() {
         menuMgr.clearExitAction();
         Serial.println(F("Entering UF2 bootloader..."));
         if (dispOk) {
-            auto& d = display.getDisplay();
+            auto &d = display.getDisplay();
             d.clearDisplay();
             d.setTextSize(1);
             d.setTextColor(SH110X_WHITE);
@@ -577,9 +601,9 @@ void loop() {
             d.display();
             delay(3000);
         }
-        // Write UF2 bootloader magic to end of RAM and reset
-        // SAME51J19A: 192KB RAM at 0x20000000, so end-4 = 0x2002FFFC
-        #define BOOT_DOUBLE_TAP_ADDRESS  (0x2002FFFCul)
+// Write UF2 bootloader magic to end of RAM and reset
+// SAME51J19A: 192KB RAM at 0x20000000, so end-4 = 0x2002FFFC
+#define BOOT_DOUBLE_TAP_ADDRESS (0x2002FFFCul)
         *((volatile uint32_t *)BOOT_DOUBLE_TAP_ADDRESS) = 0xf01669efUL;
         NVIC_SystemReset();
         // Does not return
@@ -588,7 +612,7 @@ void loop() {
         menuMgr.clearExitAction();
         Serial.println(F("Entering USB drive mode..."));
         if (dispOk) {
-            auto& d = display.getDisplay();
+            auto &d = display.getDisplay();
             d.clearDisplay();
             d.setTextSize(1);
             d.setTextColor(SH110X_WHITE);
@@ -600,7 +624,7 @@ void loop() {
         if (!configMgr.writeFlag("usb_drive")) {
             Serial.println(F("USB flag write FAILED — cannot enter drive mode"));
             if (dispOk) {
-                auto& d = display.getDisplay();
+                auto &d = display.getDisplay();
                 d.clearDisplay();
                 d.setTextSize(1);
                 d.setTextColor(SH110X_WHITE);
@@ -628,7 +652,7 @@ void loop() {
         // recovery is to expose the raw flash over USB and let the host PC
         // reformat it as FAT. Enter USB drive mode now (no flash write needed).
         Serial.println(F("Entering USB mode for host reformat..."));
-        enterUsbDriveMode();  // does not return
+        enterUsbDriveMode(); // does not return
     }
     if (menuMgr.exitAction() == MenuExitAction::RETURN_NORMAL) {
         menuMgr.clearExitAction();
@@ -656,8 +680,7 @@ void loop() {
             Serial.println(F("Calibration mode finished."));
             // Drain buttons held during save/discard (DISCO or MEASURE+DISCO)
             // to prevent pollButtons() treating the release as a disco toggle.
-            while (buttons.isPressed(Button::DISCO) ||
-                   buttons.isPressed(Button::MEASURE)) {
+            while (buttons.isPressed(Button::DISCO) || buttons.isPressed(Button::MEASURE)) {
                 buttons.update();
                 delay(Timing::LOOP_INTERVAL_MS);
             }
@@ -671,10 +694,8 @@ void loop() {
             buttons.wasPressed(Button::SHUTDOWN);
             calOk = calibration.isCalibrated();
             if (calOk) {
-                sensorMgr.init(&calibration, ctx.config.emaAlphaStable,
-                               ctx.config.emaAlphaMoving,
-                               ctx.config.stabilityBufferLength,
-                               Defaults::emaJumpThreshold);
+                sensorMgr.init(&calibration, ctx.config.emaAlphaStable, ctx.config.emaAlphaMoving,
+                               ctx.config.stabilityBufferLength, Defaults::emaJumpThreshold);
             }
             display.initScreen();
             if (laserOk) {
@@ -705,8 +726,7 @@ void loop() {
     disco.update(lastAccX, lastAccY, lastAccZ);
 
     // ── Deferred flash write: sync RAM-buffered readings when idle ──
-    if (ctx.currentState == SystemState::IDLE && flashOk &&
-        configMgr.hasPendingToSync()) {
+    if (ctx.currentState == SystemState::IDLE && flashOk && configMgr.hasPendingToSync()) {
         configMgr.syncPendingToFlash();
     }
 
@@ -719,14 +739,16 @@ void loop() {
 
 // ── Read sensors + update fusion at 50 Hz ───────────────────────
 static void readSensorsUpdate(uint32_t now) {
-    if (now - lastSensorUpdate < Timing::SENSOR_POLL_MS) return;
+    if (now - lastSensorUpdate < Timing::SENSOR_POLL_MS) {
+        return;
+    }
 
     lastSensorUpdate = now;
 
     if (magOk && mag.measurementComplete()) {
         RM3100::Reading mr = mag.getLastReading();
         mag.toMicroTesla(mr, lastMagX, lastMagY, lastMagZ);
-        mag.startSingleReading();  // immediately kick off next measurement
+        mag.startSingleReading(); // immediately kick off next measurement
     }
 
     if (imuOk) {
@@ -743,7 +765,7 @@ static void readSensorsUpdate(uint32_t now) {
     if (calOk && magOk && imuOk) {
         Eigen::Vector3f rawMag(lastMagX, lastMagY, lastMagZ);
         Eigen::Vector3f rawGrav(lastAccX, lastAccY, lastAccZ);
-        float _gyroMag = sqrtf(lastGyroX*lastGyroX + lastGyroY*lastGyroY + lastGyroZ*lastGyroZ);
+        float _gyroMag = sqrtf(lastGyroX * lastGyroX + lastGyroY * lastGyroY + lastGyroZ * lastGyroZ);
         sensorMgr.update(rawMag, rawGrav, _gyroMag > Defaults::gyroMovingThreshold);
 
         // Boot-time sanity check: after EMA settles, verify field strength
@@ -785,7 +807,9 @@ static void pollButtons(uint32_t now) {
         if (ctx.displayFrozen && !ctx.laserEnabled) {
             // Leg complete — laser off, just unfreeze + turn laser on
             ctx.displayFrozen = false;
-            if (laserOk) laser.setLaser(true);
+            if (laserOk) {
+                laser.setLaser(true);
+            }
             ctx.laserEnabled = true;
             lastDistance = 0;
             disco.turnOff();
@@ -829,7 +853,7 @@ static void pollButtons(uint32_t now) {
         ctx.lastActivityTime = now;
         if (!discoHolding) {
             discoHoldStart = now;
-            discoHolding   = true;
+            discoHolding = true;
             discoTriggered = false;
         } else if (!discoTriggered) {
             uint32_t held = now - discoHoldStart;
@@ -838,13 +862,17 @@ static void pollButtons(uint32_t now) {
                 if (ctx.discoOn) {
                     disco.turnOff();
                     ctx.discoOn = false;
-                    if (laserOk) laser.setLaser(false);
+                    if (laserOk) {
+                        laser.setLaser(false);
+                    }
                     ctx.laserEnabled = false;
                     Serial.println(F("DISCO: off"));
                 } else {
                     disco.startDisco();
                     ctx.discoOn = true;
-                    if (laserOk) laser.setLaser(false);
+                    if (laserOk) {
+                        laser.setLaser(false);
+                    }
                     ctx.laserEnabled = false;
                     Serial.println(F("DISCO: on"));
                 }
@@ -857,7 +885,9 @@ static void pollButtons(uint32_t now) {
 
             if (ctx.displayFrozen && !ctx.laserEnabled) {
                 ctx.displayFrozen = false;
-                if (laserOk) laser.setLaser(true);
+                if (laserOk) {
+                    laser.setLaser(true);
+                }
                 ctx.laserEnabled = true;
                 lastDistance = 0;
                 disco.turnOff();
@@ -896,16 +926,17 @@ static void pollButtons(uint32_t now) {
     }
 
     // ── Button 3 (CALIB) — short press: enter menu mode ──
-    if (buttons.wasPressed(Button::CALIB) &&
-        ctx.currentState == SystemState::IDLE) {
+    if (buttons.wasPressed(Button::CALIB) && ctx.currentState == SystemState::IDLE) {
         ctx.lastActivityTime = now;
         Serial.println(F("CALIB pressed — entering menu mode"));
-        if (laserOk) laser.setLaser(false);
+        if (laserOk) {
+            laser.setLaser(false);
+        }
         ctx.laserEnabled = false;
         disco.turnOff();
         ctx.discoOn = false;
         menuMgr.begin(display.getDisplay(), ctx, configMgr);
-        return;  // skip rest of pollButtons
+        return; // skip rest of pollButtons
     }
 
     // ── Button 4 (SHUTDOWN) — power off with post-measurement guard ──
@@ -919,7 +950,9 @@ static void pollButtons(uint32_t now) {
         if (ctx.displayFrozen && !ctx.laserEnabled) {
             // Leg complete — laser off, just unfreeze + turn laser on
             ctx.displayFrozen = false;
-            if (laserOk) laser.setLaser(true);
+            if (laserOk) {
+                laser.setLaser(true);
+            }
             ctx.laserEnabled = true;
             lastDistance = 0;
             disco.turnOff();
@@ -957,8 +990,12 @@ static void pollButtons(uint32_t now) {
 
 // ── Measurement workflow ────────────────────────────────────────
 static void pollMeasurement(uint32_t now) {
-    if (ctx.currentState != SystemState::TAKING_MEASUREMENT) return;
-    if (ctx.measurementTaken) return;
+    if (ctx.currentState != SystemState::TAKING_MEASUREMENT) {
+        return;
+    }
+    if (ctx.measurementTaken) {
+        return;
+    }
     if (!calOk || !magOk || !imuOk || !laserOk) {
         Serial.println(F("MEAS: sensors not ready"));
         ctx.quickShot = false;
@@ -988,8 +1025,7 @@ static void pollMeasurement(uint32_t now) {
     }
 
     // Wait for stability — use wider tolerance for quick shot
-    float stabTol = ctx.quickShot ? Defaults::quickShotStabilityTol
-                                  : ctx.config.stabilityTolerance;
+    float stabTol = ctx.quickShot ? Defaults::quickShotStabilityTol : ctx.config.stabilityTolerance;
     if (!sensorMgr.isStable(stabTol)) {
         static uint32_t lastStabDbg = 0;
         uint32_t n = millis();
@@ -1007,13 +1043,15 @@ static void pollMeasurement(uint32_t now) {
     Serial.println(F("MEAS: stable — measuring"));
 
     // ── Stable — take measurement ────────────────────────────
-    ctx.readings.azimuth     = sensorMgr.getAzimuth();
+    ctx.readings.azimuth = sensorMgr.getAzimuth();
     ctx.readings.inclination = sensorMgr.getInclination();
-    ctx.readings.roll        = sensorMgr.getRoll();
+    ctx.readings.roll = sensorMgr.getRoll();
 
     // Flush any stale UART data before talking to laser
-    while (Serial1.available()) Serial1.read();
-    delay(50);  // let the UART line settle
+    while (Serial1.available()) {
+        Serial1.read();
+    }
+    delay(50); // let the UART line settle
 
     // Take laser distance
     Serial.println(F("MEAS: sending measure cmd..."));
@@ -1033,37 +1071,44 @@ static void pollMeasurement(uint32_t now) {
         return;
     }
 
-    ctx.readings.distance = (distMm / 1000.0f) + (ctx.config.measureFromFront ? -Defaults::laserFrontOffset : ctx.config.laserDistanceOffset);
+    ctx.readings.distance =
+        (distMm / 1000.0f) +
+        (ctx.config.measureFromFront ? -Defaults::laserFrontOffset : ctx.config.laserDistanceOffset);
     lastDistance = ctx.readings.distance;
-    Serial.print(F("MEAS: dist=")); Serial.println(ctx.readings.distance, 3);
+    Serial.print(F("MEAS: dist="));
+    Serial.println(ctx.readings.distance, 3);
 
     // Anomaly detection
     Serial.println(F("MEAS: checking anomaly..."));
     if (ctx.config.anomalyDetection) {
         Eigen::Vector3f rawMag(lastMagX, lastMagY, lastMagZ);
         Eigen::Vector3f rawGrav(lastAccX, lastAccY, lastAccZ);
-        MagCal::Strictness strict = {
-            ctx.config.magTolerance,
-            ctx.config.gravTolerance,
-            ctx.config.dipTolerance
-        };
+        MagCal::Strictness strict = {ctx.config.magTolerance, ctx.config.gravTolerance,
+                                     ctx.config.dipTolerance};
         MagCal::AnomalyType anom = calibration.checkAnomaly(rawMag, rawGrav, strict);
         if (anom != MagCal::AnomalyType::NONE) {
-            const char* errStr = "Err";
+            const char *errStr = "Err";
             switch (anom) {
-                case MagCal::AnomalyType::MAGNETIC: errStr = "MagErr"; break;
-                case MagCal::AnomalyType::GRAVITY:  errStr = "GravErr"; break;
-                case MagCal::AnomalyType::DIP:      errStr = "DipErr"; break;
-                default: break;
+            case MagCal::AnomalyType::MAGNETIC:
+                errStr = "MagErr";
+                break;
+            case MagCal::AnomalyType::GRAVITY:
+                errStr = "GravErr";
+                break;
+            case MagCal::AnomalyType::DIP:
+                errStr = "DipErr";
+                break;
+            default:
+                break;
             }
-            Serial.print(F("MEAS: anomaly: ")); Serial.println(errStr);
+            Serial.print(F("MEAS: anomaly: "));
+            Serial.println(errStr);
             alertError(errStr);
             // Still update display with the readings
-            dispAz  = ctx.readings.azimuth;
+            dispAz = ctx.readings.azimuth;
             dispInc = ctx.readings.inclination;
             if (dispOk) {
-                display.updateSensorReadings(ctx.readings.distance,
-                                             ctx.readings.azimuth,
+                display.updateSensorReadings(ctx.readings.distance, ctx.readings.azimuth,
                                              ctx.readings.inclination);
                 display.refresh();
             }
@@ -1075,9 +1120,7 @@ static void pollMeasurement(uint32_t now) {
 
     // Success! Show distance immediately before blocking buzzer/wibble sequence
     if (dispOk) {
-        display.updateSensorReadings(ctx.readings.distance,
-                                     ctx.readings.azimuth,
-                                     ctx.readings.inclination);
+        display.updateSensorReadings(ctx.readings.distance, ctx.readings.azimuth, ctx.readings.inclination);
         display.refresh();
     }
 
@@ -1086,14 +1129,18 @@ static void pollMeasurement(uint32_t now) {
     Serial.println(F("MEAS: handleSuccess done"));
 
     // Freeze display — stays showing shot readings until next button press
-    dispAz  = ctx.readings.azimuth;
+    dispAz = ctx.readings.azimuth;
     dispInc = ctx.readings.inclination;
     ctx.displayFrozen = true;
 
     // Laser off after shot — user presses MEASURE/FIRE to re-enable
-    if (laserOk) laser.setLaser(false);
+    if (laserOk) {
+        laser.setLaser(false);
+    }
     ctx.laserEnabled = false;
-    if (!ctx.purpleLatched) disco.turnOff();
+    if (!ctx.purpleLatched) {
+        disco.turnOff();
+    }
 
     ctx.quickShot = false;
     ctx.currentState = SystemState::IDLE;
@@ -1122,18 +1169,18 @@ static void handleMeasurementSuccess() {
     delay(50);
     // Send via BLE or queue
     if (ctx.bleConnected && bleOk) {
-        Serial.println(F("  HS:2a ble send")); Serial.flush(); delay(50);
-        ble.sendSurveyData(ctx.readings.azimuth,
-                           ctx.readings.inclination,
-                           ctx.readings.distance);
+        Serial.println(F("  HS:2a ble send"));
+        Serial.flush();
+        delay(50);
+        ble.sendSurveyData(ctx.readings.azimuth, ctx.readings.inclination, ctx.readings.distance);
         ctx.bleDisconnectionCounter = 0;
     } else {
         ctx.bleDisconnectionCounter++;
-        if (dispOk) display.updateBTNumber(ctx.bleDisconnectionCounter);
+        if (dispOk) {
+            display.updateBTNumber(ctx.bleDisconnectionCounter);
+        }
         // Buffer reading in RAM — synced to flash during IDLE or shutdown
-        configMgr.appendPendingReading(ctx.readings.azimuth,
-                                       ctx.readings.inclination,
-                                       ctx.readings.distance);
+        configMgr.appendPendingReading(ctx.readings.azimuth, ctx.readings.inclination, ctx.readings.distance);
     }
 
     // ── Leg consistency buffer (skip for quick shots) ─────────
@@ -1143,40 +1190,42 @@ static void handleMeasurementSuccess() {
         return;
     }
 
-    Serial.println(F("  HS:3 leg buf")); Serial.flush();
+    Serial.println(F("  HS:3 leg buf"));
+    Serial.flush();
     uint8_t idx = ctx.stableBufCount;
 
     if (idx < 3) {
         // Buffer not full, add the readings to the end.
-        ctx.stableAzimuthBuf[idx]     = ctx.readings.azimuth;
+        ctx.stableAzimuthBuf[idx] = ctx.readings.azimuth;
         ctx.stableInclinationBuf[idx] = ctx.readings.inclination;
-        ctx.stableDistanceBuf[idx]    = ctx.readings.distance;
+        ctx.stableDistanceBuf[idx] = ctx.readings.distance;
         ctx.stableBufCount++;
     } else {
         // Buffer full, discard oldest readings and shift the rest left to make room for the new ones.
 
         // Shift Azimuth
-        ctx.stableAzimuthBuf[0]     = ctx.stableAzimuthBuf[1];
-        ctx.stableAzimuthBuf[1]     = ctx.stableAzimuthBuf[2];
+        ctx.stableAzimuthBuf[0] = ctx.stableAzimuthBuf[1];
+        ctx.stableAzimuthBuf[1] = ctx.stableAzimuthBuf[2];
         // Shift Inclination
         ctx.stableInclinationBuf[0] = ctx.stableInclinationBuf[1];
         ctx.stableInclinationBuf[1] = ctx.stableInclinationBuf[2];
         // Shift Distance
-        ctx.stableDistanceBuf[0]    = ctx.stableDistanceBuf[1];
-        ctx.stableDistanceBuf[1]    = ctx.stableDistanceBuf[2];
+        ctx.stableDistanceBuf[0] = ctx.stableDistanceBuf[1];
+        ctx.stableDistanceBuf[1] = ctx.stableDistanceBuf[2];
 
         // Add the new readings
-        ctx.stableAzimuthBuf[2]     = ctx.readings.azimuth;
+        ctx.stableAzimuthBuf[2] = ctx.readings.azimuth;
         ctx.stableInclinationBuf[2] = ctx.readings.inclination;
-        ctx.stableDistanceBuf[2]    = ctx.readings.distance;
+        ctx.stableDistanceBuf[2] = ctx.readings.distance;
     }
 
-    Serial.println(F("  HS:4 leg check")); Serial.flush();
+    Serial.println(F("  HS:4 leg check"));
+    Serial.flush();
 
     // Check leg completion when we have 3 readings
     if (ctx.stableBufCount >= 3) {
-        bool azOk   = bearingsWithinTol(ctx.stableAzimuthBuf, 3, ctx.config.legAngleTolerance);
-        bool incOk  = linearWithinTol(ctx.stableInclinationBuf, 3, ctx.config.legAngleTolerance);
+        bool azOk = bearingsWithinTol(ctx.stableAzimuthBuf, 3, ctx.config.legAngleTolerance);
+        bool incOk = linearWithinTol(ctx.stableInclinationBuf, 3, ctx.config.legAngleTolerance);
         bool distOk = linearWithinTol(ctx.stableDistanceBuf, 3, ctx.config.legDistanceTolerance);
 
         bool legComplete = azOk && incOk && distOk;
@@ -1214,12 +1263,13 @@ static void handleMeasurementSuccess() {
     // (function already returned if leg complete)
     laser.doubleBeep();
 
-    Serial.println(F("  HS:5 done")); Serial.flush();
+    Serial.println(F("  HS:5 done"));
+    Serial.flush();
     ctx.measurementTaken = false;
 }
 
 // ── Error alert — red flash sequence ────────────────────────────
-static void alertError(const char* errCode) {
+static void alertError(const char *errCode) {
     if (dispOk) {
         display.updateDistanceText(errCode);
         display.refresh();
@@ -1245,8 +1295,12 @@ static void alertError(const char* errCode) {
 
 // ── BLE pin monitoring (connection state + flush) ───────────────
 static void pollBLEPin(uint32_t now) {
-    if (!bleOk) return;
-    if (now - lastBleCheck < Timing::BLE_PIN_CHECK_MS) return;
+    if (!bleOk) {
+        return;
+    }
+    if (now - lastBleCheck < Timing::BLE_PIN_CHECK_MS) {
+        return;
+    }
     lastBleCheck = now;
 
     bool connected = ble.isConnected();
@@ -1263,7 +1317,7 @@ static void pollBLEPin(uint32_t now) {
                 display.updateBTNumber(ctx.bleDisconnectionCounter);
                 display.refresh();
             }
-            delay(1000);   // let BLE slave be ready
+            delay(1000); // let BLE slave be ready
 
             configMgr.flushPendingReadings(onFlushReading);
             configMgr.clearPendingReadings();
@@ -1299,76 +1353,92 @@ static void pollBLEPin(uint32_t now) {
 
 // ── BLE UART command processing ─────────────────────────────────
 static void pollBLECommands(uint32_t now) {
-    if (!bleOk) return;
-    if (now - lastBleUartPoll < Timing::BLE_UART_POLL_MS) return;
+    if (!bleOk) {
+        return;
+    }
+    if (now - lastBleUartPoll < Timing::BLE_UART_POLL_MS) {
+        return;
+    }
     lastBleUartPoll = now;
 
     ble.update();
-    if (!ble.hasCommand()) return;
+    if (!ble.hasCommand()) {
+        return;
+    }
 
     BleCommand cmd = ble.readCommand();
     Serial.print(F("BLE CMD: "));
     Serial.println(BleManager::commandName(cmd));
 
     switch (cmd) {
-        case BleCommand::ACK_RECEIVED:
-            ctx.bleReadingsTransferredFlag = true;
-            break;
+    case BleCommand::ACK_RECEIVED:
+        ctx.bleReadingsTransferredFlag = true;
+        break;
 
-        case BleCommand::READY:
-            bleReadySeen = true;
-            break;
+    case BleCommand::READY:
+        bleReadySeen = true;
+        break;
 
-        case BleCommand::TAKE_SHOT:
-            ctx.currentState = SystemState::TAKING_MEASUREMENT;
-            ctx.measurementTaken = false;
-            measRedLedSet = false;
-            ctx.lastActivityTime = now;
-            break;
+    case BleCommand::TAKE_SHOT:
+        ctx.currentState = SystemState::TAKING_MEASUREMENT;
+        ctx.measurementTaken = false;
+        measRedLedSet = false;
+        ctx.lastActivityTime = now;
+        break;
 
-        case BleCommand::LASER_ON:
-            if (laserOk) laser.setLaser(true);
-            ctx.laserEnabled = true;
-            break;
+    case BleCommand::LASER_ON:
+        if (laserOk) {
+            laser.setLaser(true);
+        }
+        ctx.laserEnabled = true;
+        break;
 
-        case BleCommand::LASER_OFF:
-            if (laserOk) laser.setLaser(false);
-            ctx.laserEnabled = false;
-            break;
+    case BleCommand::LASER_OFF:
+        if (laserOk) {
+            laser.setLaser(false);
+        }
+        ctx.laserEnabled = false;
+        break;
 
-        case BleCommand::DEVICE_OFF:
-            doShutdown();
-            break;
+    case BleCommand::DEVICE_OFF:
+        doShutdown();
+        break;
 
-        case BleCommand::START_CAL:
-            Serial.println(F("BLE: entering menu mode"));
-            if (laserOk) laser.setLaser(false);
-            ctx.laserEnabled = false;
-            disco.turnOff();
-            ctx.discoOn = false;
-            menuMgr.begin(display.getDisplay(), ctx, configMgr);
-            break;
+    case BleCommand::START_CAL:
+        Serial.println(F("BLE: entering menu mode"));
+        if (laserOk) {
+            laser.setLaser(false);
+        }
+        ctx.laserEnabled = false;
+        disco.turnOff();
+        ctx.discoOn = false;
+        menuMgr.begin(display.getDisplay(), ctx, configMgr);
+        break;
 
-        case BleCommand::STOP_CAL:
-            ctx.currentState = SystemState::IDLE;
-            break;
+    case BleCommand::STOP_CAL:
+        ctx.currentState = SystemState::IDLE;
+        break;
 
-        default:
-            break;
+    default:
+        break;
     }
 }
 
 // ── BLE startup name sync (robust against faster main-board boot) ──
 static void pollBLEStartupNameSync(uint32_t now) {
-    if (!bleOk || bleNameSyncDone) return;
+    if (!bleOk || bleNameSyncDone) {
+        return;
+    }
 
     constexpr uint32_t NAME_SYNC_INITIAL_DELAY_MS = 1200;
-    constexpr uint32_t NAME_SYNC_RETRY_MS         = 800;
-    constexpr uint32_t NAME_SYNC_AFTER_READY_MS   = 150;
-    constexpr uint8_t  NAME_SYNC_MAX_ATTEMPTS     = 6;
+    constexpr uint32_t NAME_SYNC_RETRY_MS = 800;
+    constexpr uint32_t NAME_SYNC_AFTER_READY_MS = 150;
+    constexpr uint8_t NAME_SYNC_MAX_ATTEMPTS = 6;
 
     uint32_t elapsed = now - bleNameSyncStartMs;
-    if (elapsed < NAME_SYNC_INITIAL_DELAY_MS) return;
+    if (elapsed < NAME_SYNC_INITIAL_DELAY_MS) {
+        return;
+    }
     if (bleNameSyncAttempts >= NAME_SYNC_MAX_ATTEMPTS) {
         bleNameSyncDone = true;
         Serial.println(F("BLE NAME: sync window ended"));
@@ -1377,8 +1447,7 @@ static void pollBLEStartupNameSync(uint32_t now) {
 
     // If DiscoX reports READY, force one post-ready NAME send and stop.
     if (bleReadySeen && !bleNameSentAfterReady) {
-        if (bleNameSyncLastSendMs != 0 &&
-            (now - bleNameSyncLastSendMs) < NAME_SYNC_AFTER_READY_MS) {
+        if (bleNameSyncLastSendMs != 0 && (now - bleNameSyncLastSendMs) < NAME_SYNC_AFTER_READY_MS) {
             return;
         }
 
@@ -1391,8 +1460,7 @@ static void pollBLEStartupNameSync(uint32_t now) {
         return;
     }
 
-    if (bleNameSyncLastSendMs != 0 &&
-        (now - bleNameSyncLastSendMs) < NAME_SYNC_RETRY_MS) {
+    if (bleNameSyncLastSendMs != 0 && (now - bleNameSyncLastSendMs) < NAME_SYNC_RETRY_MS) {
         return;
     }
 
@@ -1412,16 +1480,25 @@ static void pollBLEStartupNameSync(uint32_t now) {
 
 // ── Battery check (every 30s) ───────────────────────────────────
 static void pollBattery(uint32_t now) {
-    if (!batOk) return;
-    if (now - lastBatRead < Timing::BATTERY_CHECK_MS) return;
+    if (!batOk) {
+        return;
+    }
+    if (now - lastBatRead < Timing::BATTERY_CHECK_MS) {
+        return;
+    }
     lastBatRead = now;
 
     lastBatPct = battery.cellPercent();
     ctx.readings.batteryLevel = lastBatPct;
-    Serial.print(F("BAT: ")); Serial.print(battery.cellVoltage(), 3);
-    Serial.print(F("V  ")); Serial.print(lastBatPct, 1); Serial.println(F("%"));
+    Serial.print(F("BAT: "));
+    Serial.print(battery.cellVoltage(), 3);
+    Serial.print(F("V  "));
+    Serial.print(lastBatPct, 1);
+    Serial.println(F("%"));
 
-    if (dispOk) display.updateBattery(lastBatPct);
+    if (dispOk) {
+        display.updateBattery(lastBatPct);
+    }
 
     if (lastBatPct > 0.5f && lastBatPct <= Timing::BATTERY_SHUTDOWN_PCT) {
         Serial.println(F("LOW BATTERY — shutting down"));
@@ -1439,7 +1516,9 @@ static void pollBattery(uint32_t now) {
 
 // ── Auto shutdown check (every 5s) ──────────────────────────────
 static void checkAutoShutoff(uint32_t now) {
-    if (now - lastAutoShutCheck < Timing::AUTO_SHUTOFF_CHECK_MS) return;
+    if (now - lastAutoShutCheck < Timing::AUTO_SHUTOFF_CHECK_MS) {
+        return;
+    }
     lastAutoShutCheck = now;
 
     uint32_t inactiveSec = (now - ctx.lastActivityTime) / 1000;
@@ -1451,23 +1530,33 @@ static void checkAutoShutoff(uint32_t now) {
 
 // ── Laser timeout check (every 1s) ─────────────────────────────
 static void checkLaserTimeout(uint32_t now) {
-    if (now - lastLaserTimeCheck < Timing::LASER_TIMEOUT_CHECK_MS) return;
+    if (now - lastLaserTimeCheck < Timing::LASER_TIMEOUT_CHECK_MS) {
+        return;
+    }
     lastLaserTimeCheck = now;
 
-    if (!ctx.laserEnabled) return;
+    if (!ctx.laserEnabled) {
+        return;
+    }
 
     uint32_t inactiveSec = (now - ctx.lastActivityTime) / 1000;
     if (inactiveSec > ctx.config.laserTimeout) {
         Serial.println(F("Laser timeout — turning off"));
-        if (laserOk) laser.setLaser(false);
+        if (laserOk) {
+            laser.setLaser(false);
+        }
         ctx.laserEnabled = false;
     }
 }
 
 // ── Display update (4 Hz) ───────────────────────────────────────
 static void updateDisplay(uint32_t now) {
-    if (!dispOk) return;
-    if (now - lastDisplayRefresh < Timing::DISPLAY_REFRESH_MS) return;
+    if (!dispOk) {
+        return;
+    }
+    if (now - lastDisplayRefresh < Timing::DISPLAY_REFRESH_MS) {
+        return;
+    }
     lastDisplayRefresh = now;
 
     // Only update live sensor readings when display is not frozen.
@@ -1476,50 +1565,60 @@ static void updateDisplay(uint32_t now) {
     if (!ctx.displayFrozen) {
         float liveAz, liveInc;
         if (calOk) {
-            liveAz  = sensorMgr.getAzimuth();
+            liveAz = sensorMgr.getAzimuth();
             liveInc = sensorMgr.getInclination();
         } else {
             liveAz = atan2f(lastMagY, lastMagX) * (180.0f / PI);
-            if (liveAz < 0) liveAz += 360.0f;
-            liveInc = atan2f(lastAccZ,
-                      sqrtf(lastAccX * lastAccX + lastAccY * lastAccY))
-                      * (180.0f / PI);
+            if (liveAz < 0) {
+                liveAz += 360.0f;
+            }
+            liveInc = atan2f(lastAccZ, sqrtf(lastAccX * lastAccX + lastAccY * lastAccY)) * (180.0f / PI);
         }
 
         // Gyro-gated freeze: only update displayed values when device is moving.
         // A short settle delay lets the EMA converge before locking.
-        float gyroMag = sqrtf(lastGyroX * lastGyroX +
-                              lastGyroY * lastGyroY +
-                              lastGyroZ * lastGyroZ);
+        float gyroMag = sqrtf(lastGyroX * lastGyroX + lastGyroY * lastGyroY + lastGyroZ * lastGyroZ);
         bool moving = gyroMag > Defaults::gyroFreezeThreshold;
         if (moving) {
-            gyroStillSince = now;  // reset settle timer
+            gyroStillSince = now; // reset settle timer
             anchored = false;
             // Device is moving — update displayed values (with deadband)
-            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
+            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE) {
                 dispAz = liveAz;
-            if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
+            }
+            if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE) {
                 dispInc = liveInc;
+            }
         } else if ((now - gyroStillSince) < Defaults::gyroSettleMs) {
             // Still settling — keep updating so EMA can converge
-            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE)
+            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE) {
                 dispAz = liveAz;
-            if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE)
+            }
+            if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE) {
                 dispInc = liveInc;
+            }
         } else {
             // Settled — lock anchor point, clamp display to ±0.1° from anchor
             if (!anchored) {
-                anchorAz  = dispAz;
+                anchorAz = dispAz;
                 anchorInc = dispInc;
-                anchored  = true;
+                anchored = true;
             }
             // Clamp azimuth to anchor ±0.1° (circular)
             float azDiff = liveAz - anchorAz;
-            if (azDiff > 180.0f)  azDiff -= 360.0f;
-            if (azDiff < -180.0f) azDiff += 360.0f;
+            if (azDiff > 180.0f) {
+                azDiff -= 360.0f;
+            }
+            if (azDiff < -180.0f) {
+                azDiff += 360.0f;
+            }
             float clampedAz = anchorAz + fmaxf(-0.1f, fminf(0.1f, azDiff));
-            if (clampedAz < 0.0f)    clampedAz += 360.0f;
-            if (clampedAz >= 360.0f) clampedAz -= 360.0f;
+            if (clampedAz < 0.0f) {
+                clampedAz += 360.0f;
+            }
+            if (clampedAz >= 360.0f) {
+                clampedAz -= 360.0f;
+            }
             dispAz = clampedAz;
             // Clamp inclination to anchor ±0.1°
             float incDiff = liveInc - anchorInc;
@@ -1529,8 +1628,10 @@ static void updateDisplay(uint32_t now) {
         display.updateSensorReadings(lastDistance, dispAz, dispInc);
 
         // Teleplot output
-        Serial.print(F(">azimuth:")); Serial.println(dispAz, 1);
-        Serial.print(F(">inclination:")); Serial.println(dispInc, 1);
+        Serial.print(F(">azimuth:"));
+        Serial.println(dispAz, 1);
+        Serial.print(F(">inclination:"));
+        Serial.println(dispInc, 1);
     }
 
     display.updateBattery(lastBatPct);
@@ -1543,13 +1644,17 @@ static void updateDisplay(uint32_t now) {
 // ═══════════════════════════════════════════════════════════════════
 
 static void resetLaser() {
-    if (!laserOk) return;
+    if (!laserOk) {
+        return;
+    }
     Serial.println(F("LASER: resetting"));
     laser.setLaser(false);
     delay(100);
-    while (Serial1.available()) Serial1.read();  // flush UART
+    while (Serial1.available()) {
+        Serial1.read(); // flush UART
+    }
     laser.setLaser(true);
-    delay(200);  // let module stabilise
+    delay(200); // let module stabilise
     ctx.laserEnabled = true;
 }
 
@@ -1566,7 +1671,9 @@ static void doShutdown() {
     delay(100);
     digitalWrite(PIN_POWER, LOW);
     // If still running (USB-powered), just hang
-    while (true) { delay(1000); }
+    while (true) {
+        delay(1000);
+    }
 }
 
 static float circularDiff(float a, float b) {
@@ -1574,30 +1681,37 @@ static float circularDiff(float a, float b) {
     return fabsf(d);
 }
 
-static bool bearingsWithinTol(const float* vals, uint8_t n, float tol) {
+static bool bearingsWithinTol(const float *vals, uint8_t n, float tol) {
     for (uint8_t i = 0; i < n; i++) {
         for (uint8_t j = i + 1; j < n; j++) {
-            if (circularDiff(vals[i], vals[j]) > tol) return false;
+            if (circularDiff(vals[i], vals[j]) > tol) {
+                return false;
+            }
         }
     }
     return true;
 }
 
-static bool linearWithinTol(const float* vals, uint8_t n, float tol) {
+static bool linearWithinTol(const float *vals, uint8_t n, float tol) {
     for (uint8_t i = 0; i < n; i++) {
         for (uint8_t j = i + 1; j < n; j++) {
-            if (fabsf(vals[i] - vals[j]) > tol) return false;
+            if (fabsf(vals[i] - vals[j]) > tol) {
+                return false;
+            }
         }
     }
     return true;
 }
 
 static void onFlushReading(float az, float inc, float dist) {
-    Serial.print(F("FLUSH: az=")); Serial.print(az, 1);
-    Serial.print(F(" inc=")); Serial.print(inc, 1);
-    Serial.print(F(" dist=")); Serial.println(dist, 2);
+    Serial.print(F("FLUSH: az="));
+    Serial.print(az, 1);
+    Serial.print(F(" inc="));
+    Serial.print(inc, 1);
+    Serial.print(F(" dist="));
+    Serial.println(dist, 2);
     ble.sendSurveyData(az, inc, dist);
-    delay(50);   // pacing between BLE sends
+    delay(50); // pacing between BLE sends
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1610,23 +1724,25 @@ static void initPins() {
     // always return HIGH regardless of the actual pin voltage.  Disable
     // DAC1 before configuring the pin as a digital input.
     DAC->CTRLA.bit.ENABLE = 0;
-    while (DAC->SYNCBUSY.bit.ENABLE);
+    while (DAC->SYNCBUSY.bit.ENABLE)
+        ;
     DAC->DACCTRL[1].bit.ENABLE = 0;
     DAC->CTRLA.bit.ENABLE = 1;
-    while (DAC->SYNCBUSY.bit.ENABLE);
+    while (DAC->SYNCBUSY.bit.ENABLE)
+        ;
 
-    pinMode(PIN_BTN_MEASURE,  INPUT_PULLUP);
-    pinMode(PIN_BTN_DISCO,    INPUT_PULLUP);
-    pinMode(PIN_BTN_CALIB,    INPUT_PULLUP);
+    pinMode(PIN_BTN_MEASURE, INPUT_PULLUP);
+    pinMode(PIN_BTN_DISCO, INPUT_PULLUP);
+    pinMode(PIN_BTN_CALIB, INPUT_PULLUP);
     pinMode(PIN_BTN_SHUTDOWN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(PIN_BTN_SHUTDOWN), onShutdownINT, FALLING);
-    pinMode(PIN_BTN_FIRE,     INPUT_PULLUP);
+    pinMode(PIN_BTN_FIRE, INPUT_PULLUP);
 
     pinMode(PIN_POWER, OUTPUT);
     digitalWrite(PIN_POWER, HIGH);
 
     pinMode(PIN_BLE_STATUS, INPUT_PULLDOWN);
-    pinMode(PIN_BLE_DRDY,   OUTPUT);
+    pinMode(PIN_BLE_DRDY, OUTPUT);
     digitalWrite(PIN_BLE_DRDY, LOW);
 
     pinMode(PIN_MAG_DRDY, INPUT);
@@ -1641,12 +1757,22 @@ static void scanI2C() {
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0) {
             Serial.print(F("  0x"));
-            if (addr < 16) Serial.print('0');
+            if (addr < 16) {
+                Serial.print('0');
+            }
             Serial.print(addr, HEX);
-            if (addr == RM3100_I2C_ADDR)  Serial.print(F(" (RM3100 mag)"));
-            if (addr == ISM330DHCX_ADDR)  Serial.print(F(" (ISM330DHCX accel/gyro)"));
-            if (addr == MAX17048_ADDR)    Serial.print(F(" (MAX17048 battery)"));
-            if (addr == SH1107_ADDR)      Serial.print(F(" (SH1107 OLED)"));
+            if (addr == RM3100_I2C_ADDR) {
+                Serial.print(F(" (RM3100 mag)"));
+            }
+            if (addr == ISM330DHCX_ADDR) {
+                Serial.print(F(" (ISM330DHCX accel/gyro)"));
+            }
+            if (addr == MAX17048_ADDR) {
+                Serial.print(F(" (MAX17048 battery)"));
+            }
+            if (addr == SH1107_ADDR) {
+                Serial.print(F(" (SH1107 OLED)"));
+            }
             Serial.println();
             count++;
         }
@@ -1700,7 +1826,9 @@ static void initFlash() {
             configMgr.saveConfig(ctx.config);
         }
 
-        if (dispOk) display.setBrightness(ctx.config.screenBrightness);
+        if (dispOk) {
+            display.setBrightness(ctx.config.screenBrightness);
+        }
 
         uint16_t pending = configMgr.countPendingReadings();
         if (pending > 0) {
@@ -1727,7 +1855,7 @@ static void initFlash() {
         if (configMgr.hasFlag("usb_drive")) {
             configMgr.clearFlag("usb_drive");
             Serial.println(F("  ** USB drive mode flag detected"));
-            enterUsbDriveMode();  // does not return
+            enterUsbDriveMode(); // does not return
         }
     }
 
@@ -1786,14 +1914,16 @@ static void initCalibration() {
     calOk = loaded;
 
     if (calOk) {
-        Serial.print(F("  Mag axes:  ")); Serial.println(calibration.mag().axes().toString());
-        Serial.print(F("  Grav axes: ")); Serial.println(calibration.grav().axes().toString());
-        Serial.print(F("  Dip avg:   ")); Serial.print(calibration.dipAvg(), 1);
+        Serial.print(F("  Mag axes:  "));
+        Serial.println(calibration.mag().axes().toString());
+        Serial.print(F("  Grav axes: "));
+        Serial.println(calibration.grav().axes().toString());
+        Serial.print(F("  Dip avg:   "));
+        Serial.print(calibration.dipAvg(), 1);
         Serial.println(F(" deg"));
 
-        sensorMgr.init(&calibration, ctx.config.emaAlphaStable,
-                        ctx.config.emaAlphaMoving,
-                        ctx.config.stabilityBufferLength);
+        sensorMgr.init(&calibration, ctx.config.emaAlphaStable, ctx.config.emaAlphaMoving,
+                       ctx.config.stabilityBufferLength);
         Serial.print(F("  Filter:    EMA stable="));
         Serial.print(ctx.config.emaAlphaStable, 2);
         Serial.print(F(", moving="));
@@ -1804,7 +1934,7 @@ static void initCalibration() {
         // Warn user if calibration came from PROGMEM (stale compile-time data)
         if (!calFromFlash && dispOk) {
             display.blankScreen();
-            auto& disp = display.getDisplay();
+            auto &disp = display.getDisplay();
             disp.setTextColor(SH110X_WHITE);
             disp.setTextSize(2);
             disp.setCursor(0, 10);
@@ -1845,7 +1975,7 @@ static void enterUsbDriveMode() {
 
     // Show OLED message
     if (dispOk) {
-        auto& d = display.getDisplay();
+        auto &d = display.getDisplay();
         d.clearDisplay();
         d.setTextSize(1);
         d.setTextColor(SH110X_WHITE);

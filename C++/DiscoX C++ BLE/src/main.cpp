@@ -1,27 +1,27 @@
+#include "config.h"
+#include "nvm_manager.h"
+#include "sap6_protocol.h"
+#include "uart_handler.h"
 #include <Arduino.h>
 #include <bluefruit.h>
-#include "config.h"
-#include "sap6_protocol.h"
-#include "nvm_manager.h"
-#include "uart_handler.h"
 
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
 void connectCallback(uint16_t conn_handle);
 void disconnectCallback(uint16_t conn_handle, uint8_t reason);
-void restartAdvertisingWithName(const String& newName);
+void restartAdvertisingWithName(const String &newName);
 static void startAdvertising();
 
 // ---------------------------------------------------------------------------
 // Connection-monitoring state
 // ---------------------------------------------------------------------------
-static bool     lastConnected = false;
+static bool lastConnected = false;
 static uint32_t lastConnCheck = 0;
-static uint32_t phyRequestTime = 0;   // PHY update retry timer
-static bool     phyRequestPending = false;
-static uint32_t phyCheckTime = 0;     // Delayed PHY report after connection
-static bool     phyCheckPending = false;
+static uint32_t phyRequestTime = 0; // PHY update retry timer
+static bool phyRequestPending = false;
+static uint32_t phyCheckTime = 0; // Delayed PHY report after connection
+static bool phyCheckPending = false;
 
 // ---------------------------------------------------------------------------
 // Advertising helper — builds adv + scan-response data and starts
@@ -30,18 +30,18 @@ static void startAdvertising() {
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
     Bluefruit.Advertising.addService(sap6.service());
     Bluefruit.Advertising.addTxPower();
-    Bluefruit.ScanResponse.addName();   // complete name in scan response
+    Bluefruit.ScanResponse.addName(); // complete name in scan response
 
-    Bluefruit.Advertising.restartOnDisconnect(false);  // we restart manually after bond-clear
-    Bluefruit.Advertising.setInterval(32, 244);        // fast then slow advertising
-    Bluefruit.Advertising.setFastTimeout(30);           // 30 s of fast interval
-    Bluefruit.Advertising.start(0);                     // 0 = advertise forever
+    Bluefruit.Advertising.restartOnDisconnect(false); // we restart manually after bond-clear
+    Bluefruit.Advertising.setInterval(32, 244);       // fast then slow advertising
+    Bluefruit.Advertising.setFastTimeout(30);         // 30 s of fast interval
+    Bluefruit.Advertising.start(0);                   // 0 = advertise forever
 }
 
 // ---------------------------------------------------------------------------
 // Restart advertising with a new device name  (matches code.py:79-93)
 // ---------------------------------------------------------------------------
-void restartAdvertisingWithName(const String& newName) {
+void restartAdvertisingWithName(const String &newName) {
     Bluefruit.Advertising.stop();
     Bluefruit.setName(newName.c_str());
 
@@ -86,10 +86,10 @@ void setup() {
     pinMode(PIN_DRDY, INPUT_PULLDOWN);
 
     pinMode(PIN_BLE_CONNECTED, OUTPUT);
-    digitalWrite(PIN_BLE_CONNECTED, LOW);   // start disconnected
+    digitalWrite(PIN_BLE_CONNECTED, LOW); // start disconnected
 
     pinMode(PIN_LZR_POWER, OUTPUT);
-    digitalWrite(PIN_LZR_POWER, HIGH);      // laser power on
+    digitalWrite(PIN_LZR_POWER, HIGH); // laser power on
 
     // NVM — mount flash filesystem, read stored device name
     nvmInit();
@@ -98,10 +98,11 @@ void setup() {
     Serial.println(deviceName);
 
     // BLE stack — increase event length for Coded PHY (default 3 is too short)
-    Bluefruit.configPrphConn(BLE_GATT_ATT_MTU_DEFAULT, 24, BLE_GATTS_HVN_TX_QUEUE_SIZE_DEFAULT, BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
+    Bluefruit.configPrphConn(BLE_GATT_ATT_MTU_DEFAULT, 24, BLE_GATTS_HVN_TX_QUEUE_SIZE_DEFAULT,
+                             BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
     Bluefruit.begin();
-    Bluefruit.autoConnLed(false);            // disable red LED blink to save power
-    Bluefruit.setTxPower(BLE_TX_POWER);     // +8 dBm for advertising
+    Bluefruit.autoConnLed(false);       // disable red LED blink to save power
+    Bluefruit.setTxPower(BLE_TX_POWER); // +8 dBm for advertising
     Bluefruit.setName(deviceName.c_str());
 
     // Clear bonds on startup — critical for reliable re-pairing (code.py:43)
@@ -182,13 +183,13 @@ void loop() {
     if (phyRequestPending && millis() - phyRequestTime >= 500) {
         phyRequestTime = millis();
         uint16_t conn_handle = Bluefruit.connHandle();
-        ble_gap_phys_t phys = { BLE_GAP_PHY_CODED, BLE_GAP_PHY_CODED };
+        ble_gap_phys_t phys = {BLE_GAP_PHY_CODED, BLE_GAP_PHY_CODED};
         uint32_t err = sd_ble_gap_phy_update(conn_handle, &phys);
         if (err == 0) {
             Serial.println("PHY update request: OK");
             phyRequestPending = false;
             // Set connection TX power to +8 dBm (Bluefruit.setTxPower only sets advertising)
-            BLEConnection* conn = Bluefruit.Connection(conn_handle);
+            BLEConnection *conn = Bluefruit.Connection(conn_handle);
             if (conn) {
                 conn->setTxPower(BLE_TX_POWER);
                 Serial.println("Connection TX power set to +8 dBm");
@@ -203,18 +204,17 @@ void loop() {
     // ── Delayed PHY check (2 s after PHY request accepted) ──────────────
     if (phyCheckPending && millis() - phyCheckTime >= 2000) {
         phyCheckPending = false;
-        BLEConnection* conn = Bluefruit.Connection(0);
+        BLEConnection *conn = Bluefruit.Connection(0);
         if (conn) {
             uint8_t phy = conn->getPHY();
             if (phy == BLE_GAP_PHY_CODED) {
                 Serial.println("Coded PHY: YES - Long range active");
             } else {
-                const char* phyNames[] = {"Auto", "1 Mbps", "2 Mbps", "unknown", "Coded"};
-                Serial.printf("Coded PHY: NO - Fell back to %s\n",
-                              (phy <= 4) ? phyNames[phy] : "unknown");
+                const char *phyNames[] = {"Auto", "1 Mbps", "2 Mbps", "unknown", "Coded"};
+                Serial.printf("Coded PHY: NO - Fell back to %s\n", (phy <= 4) ? phyNames[phy] : "unknown");
             }
         }
     }
 
-    delay(LOOP_INTERVAL_MS);  // 10 ms — matches asyncio.sleep(0.01)
+    delay(LOOP_INTERVAL_MS); // 10 ms — matches asyncio.sleep(0.01)
 }

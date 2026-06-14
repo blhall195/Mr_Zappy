@@ -4,9 +4,9 @@
 // ---------------------------------------------------------------------------
 // Pin assignments — Adafruit ItsyBitsy nRF52840 Express
 // ---------------------------------------------------------------------------
-constexpr int PIN_DRDY          = 7;   // D7  input  pull-down — master signals data ready
-constexpr int PIN_BLE_CONNECTED = 5;   // D5  output — HIGH when BLE connected
-constexpr int PIN_LZR_POWER     = A2;  // A2  output — HIGH = laser power on
+constexpr int PIN_DRDY = 7;          // D7  input  pull-down — master signals data ready
+constexpr int PIN_BLE_CONNECTED = 5; // D5  output — HIGH when BLE connected
+constexpr int PIN_LZR_POWER = A2;    // A2  output — HIGH = laser power on
 
 // ---------------------------------------------------------------------------
 // UART (to/from master survey instrument)
@@ -30,14 +30,14 @@ extern const uint8_t SAP6_LEG_DATA_UUID[16];
 // ---------------------------------------------------------------------------
 // SAP6 protocol command bytes
 // ---------------------------------------------------------------------------
-constexpr uint8_t CMD_ACK0       = 0x55;  // Acknowledge leg with sequence bit 0
-constexpr uint8_t CMD_ACK1       = 0x56;  // Acknowledge leg with sequence bit 1
-constexpr uint8_t CMD_STOP_CAL   = 0x30;  // Finish calibration
-constexpr uint8_t CMD_START_CAL  = 0x31;  // Start calibration
-constexpr uint8_t CMD_DEVICE_OFF = 0x34;  // Turn device off
-constexpr uint8_t CMD_LASER_ON   = 0x36;  // Turn laser on
-constexpr uint8_t CMD_LASER_OFF  = 0x37;  // Turn laser off
-constexpr uint8_t CMD_TAKE_SHOT  = 0x38;  // Take a reading
+constexpr uint8_t CMD_ACK0 = 0x55;       // Acknowledge leg with sequence bit 0
+constexpr uint8_t CMD_ACK1 = 0x56;       // Acknowledge leg with sequence bit 1
+constexpr uint8_t CMD_STOP_CAL = 0x30;   // Finish calibration
+constexpr uint8_t CMD_START_CAL = 0x31;  // Start calibration
+constexpr uint8_t CMD_DEVICE_OFF = 0x34; // Turn device off
+constexpr uint8_t CMD_LASER_ON = 0x36;   // Turn laser on
+constexpr uint8_t CMD_LASER_OFF = 0x37;  // Turn laser off
+constexpr uint8_t CMD_TAKE_SHOT = 0x38;  // Take a reading
 
 // ACK lookup table — mirrors Python's  ACK = [0x56, 0x55]
 //
@@ -46,26 +46,26 @@ constexpr uint8_t CMD_TAKE_SHOT  = 0x38;  // Take a reading
 // (i.e. indexed by the already-toggled value).
 //   ACK_TABLE[0] = 0x56 (ACK1)
 //   ACK_TABLE[1] = 0x55 (ACK0)
-constexpr uint8_t ACK_TABLE[2] = { 0x56, 0x55 };
+constexpr uint8_t ACK_TABLE[2] = {0x56, 0x55};
 
 // ---------------------------------------------------------------------------
 // Timing
 // ---------------------------------------------------------------------------
-constexpr uint32_t ACK_TIMEOUT_MS   = 5000;  // resend after 5 s with no ACK
-constexpr uint32_t LOOP_INTERVAL_MS = 10;    // main-loop period
-constexpr uint32_t CONN_CHECK_MS    = 100;   // connection-state poll interval
-constexpr uint32_t DRDY_DEBOUNCE_MS = 10;    // debounce for DRDY rising edge
-constexpr int      SEND_QUEUE_MAX   = 20;    // max queued leg readings
+constexpr uint32_t ACK_TIMEOUT_MS = 5000; // resend after 5 s with no ACK
+constexpr uint32_t LOOP_INTERVAL_MS = 10; // main-loop period
+constexpr uint32_t CONN_CHECK_MS = 100;   // connection-state poll interval
+constexpr uint32_t DRDY_DEBOUNCE_MS = 10; // debounce for DRDY rising edge
+constexpr int SEND_QUEUE_MAX = 20;        // max queued leg readings
 
 // ---------------------------------------------------------------------------
 // Non-volatile storage
 // ---------------------------------------------------------------------------
-constexpr uint8_t NVM_MAGIC        = 0xBE;
-constexpr uint8_t MAX_NAME_LEN     = 20;
-constexpr char    DEFAULT_NAME[]   = "SAP6_Basic";
-constexpr char    NVM_FILENAME[]   = "/name.dat";
+constexpr uint8_t NVM_MAGIC = 0xBE;
+constexpr uint8_t MAX_NAME_LEN = 20;
+constexpr char DEFAULT_NAME[] = "SAP6_Basic";
+constexpr char NVM_FILENAME[] = "/name.dat";
 
 // ---------------------------------------------------------------------------
 // BLE radio
 // ---------------------------------------------------------------------------
-constexpr int8_t BLE_TX_POWER = 8;  // +8 dBm
+constexpr int8_t BLE_TX_POWER = 8; // +8 dBm

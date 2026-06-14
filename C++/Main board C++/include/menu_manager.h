@@ -1,32 +1,32 @@
 #pragma once
 
-#include <Arduino.h>
-#include "fruity_menu.h"
-#include "device_context.h"
-#include "config_manager.h"
 #include "button_manager.h"
+#include "config_manager.h"
+#include "device_context.h"
+#include "fruity_menu.h"
+#include <Arduino.h>
 
 /// What should happen after the menu closes
 enum class MenuExitAction : uint8_t {
-    NONE,               // still active or not yet used
-    RETURN_NORMAL,      // go back to normal operation
-    ENTER_PART1_CALIB,  // enter Part 1 calibration (ellipsoid, 56 pts)
-    ENTER_PART2_CALIB,  // enter Part 2 calibration (alignment, 24 pts)
-    ENTER_SHORT_CALIB,  // enter short calibration mode
-    ENTER_SNAKE,        // launch snake game
-    ENTER_FB_CHECK,     // enter foresight/backsight field check
-    ENTER_BOOTLOADER,   // reboot into UF2 bootloader for firmware update
-    ENTER_USB_DRIVE,    // reboot into USB mass storage mode for settings
-    REFORMAT_FLASH,     // erase + reformat QSPI flash (recovery), then reboot
+    NONE,              // still active or not yet used
+    RETURN_NORMAL,     // go back to normal operation
+    ENTER_PART1_CALIB, // enter Part 1 calibration (ellipsoid, 56 pts)
+    ENTER_PART2_CALIB, // enter Part 2 calibration (alignment, 24 pts)
+    ENTER_SHORT_CALIB, // enter short calibration mode
+    ENTER_SNAKE,       // launch snake game
+    ENTER_FB_CHECK,    // enter foresight/backsight field check
+    ENTER_BOOTLOADER,  // reboot into UF2 bootloader for firmware update
+    ENTER_USB_DRIVE,   // reboot into USB mass storage mode for settings
+    REFORMAT_FLASH,    // erase + reformat QSPI flash (recovery), then reboot
 };
 
 class MenuManager {
-public:
+  public:
     // Enter menu mode — takes over the display until exit
-    void begin(Adafruit_SH1107& display, DeviceContext& ctx, ConfigManager& cfgMgr);
+    void begin(Adafruit_SH1107 &display, DeviceContext &ctx, ConfigManager &cfgMgr);
 
     // Poll buttons and drive the menu. Call once per loop() iteration.
-    void update(ButtonManager& buttons);
+    void update(ButtonManager &buttons);
 
     bool isActive() const { return _active; }
 
@@ -36,7 +36,7 @@ public:
     /// Clear the exit action after it has been handled
     void clearExitAction() { _exitAction = MenuExitAction::NONE; }
 
-private:
+  private:
     void buildMenu();
 
     // Menu hierarchy (statically allocated, rebuilt on setting changes)
@@ -61,17 +61,17 @@ private:
     char _measureFromLabel[24];
 
     // State
-    Adafruit_SH1107* _display  = nullptr;
-    DeviceContext*    _ctx     = nullptr;
-    ConfigManager*    _cfgMgr  = nullptr;
-    bool              _active  = false;
-    bool              _viewingCalMetrics = false;
-    uint32_t          _lastActivity = 0;
-    uint32_t          _entryTime    = 0;      // for input grace period
-    MenuExitAction    _exitAction = MenuExitAction::NONE;
+    Adafruit_SH1107 *_display = nullptr;
+    DeviceContext *_ctx = nullptr;
+    ConfigManager *_cfgMgr = nullptr;
+    bool _active = false;
+    bool _viewingCalMetrics = false;
+    uint32_t _lastActivity = 0;
+    uint32_t _entryTime = 0; // for input grace period
+    MenuExitAction _exitAction = MenuExitAction::NONE;
 
     // Static singleton pointer for callbacks
-    static MenuManager* s_instance;
+    static MenuManager *s_instance;
 
     // Callbacks (static free functions, access state via s_instance)
     static void goToRoot(int);

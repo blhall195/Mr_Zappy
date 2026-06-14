@@ -2,7 +2,7 @@
 
 namespace MagCal {
 
-void RBF::init(const float* params, int count) {
+void RBF::init(const float *params, int count) {
     paramCount_ = (count > MAX_PARAMS) ? MAX_PARAMS : count;
     for (int i = 0; i < paramCount_; i++) {
         params_[i] = params[i];
@@ -29,14 +29,14 @@ float RBF::evaluate(float x) const {
     return result;
 }
 
-void RBF::getGaussians(float x, float* out) const {
+void RBF::getGaussians(float x, float *out) const {
     for (int i = 0; i < paramCount_; i++) {
         float dist = (x - offsets_[i]) / epsilon_;
         out[i] = expf(-dist * dist);
     }
 }
 
-void RBF::getGaussians(double x, double* out) const {
+void RBF::getGaussians(double x, double *out) const {
     for (int i = 0; i < paramCount_; i++) {
         double dist = (x - (double)offsets_[i]) / (double)epsilon_;
         out[i] = exp(-dist * dist);

@@ -1,34 +1,38 @@
 #include "fruity_menu.h"
 
-void FruityMenu::init(Adafruit_SH1107& display, const char* title) {
+void FruityMenu::init(Adafruit_SH1107 &display, const char *title) {
     _display = &display;
-    _title   = title;
+    _title = title;
     clear();
 }
 
 void FruityMenu::clear() {
-    _count     = 0;
+    _count = 0;
     _selection = 0;
     _activeSub = nullptr;
     memset(_items, 0, sizeof(_items));
 }
 
-void FruityMenu::addAction(const char* text, MenuAction cb, int arg) {
-    if (_count >= MAX_ITEMS) return;
-    FruityMenuItem& item = _items[_count++];
-    item.text      = text;
-    item.action    = cb;
+void FruityMenu::addAction(const char *text, MenuAction cb, int arg) {
+    if (_count >= MAX_ITEMS) {
+        return;
+    }
+    FruityMenuItem &item = _items[_count++];
+    item.text = text;
+    item.action = cb;
     item.actionArg = arg;
-    item.submenu   = nullptr;
+    item.submenu = nullptr;
 }
 
-void FruityMenu::addSubmenu(const char* text, FruityMenu* sub) {
-    if (_count >= MAX_ITEMS) return;
-    FruityMenuItem& item = _items[_count++];
-    item.text      = text;
-    item.action    = nullptr;
+void FruityMenu::addSubmenu(const char *text, FruityMenu *sub) {
+    if (_count >= MAX_ITEMS) {
+        return;
+    }
+    FruityMenuItem &item = _items[_count++];
+    item.text = text;
+    item.action = nullptr;
     item.actionArg = 0;
-    item.submenu   = sub;
+    item.submenu = sub;
 }
 
 void FruityMenu::scroll(int8_t delta) {
@@ -36,7 +40,9 @@ void FruityMenu::scroll(int8_t delta) {
         _activeSub->scroll(delta);
         return;
     }
-    if (_count == 0) return;
+    if (_count == 0) {
+        return;
+    }
 
     if (delta > 0) {
         _selection = (_selection + 1) % _count;
@@ -54,9 +60,11 @@ void FruityMenu::click() {
         _activeSub->click();
         return;
     }
-    if (_count == 0) return;
+    if (_count == 0) {
+        return;
+    }
 
-    FruityMenuItem& item = _items[_selection];
+    FruityMenuItem &item = _items[_selection];
     if (item.submenu) {
         // Open submenu, reset its selection to top
         _activeSub = item.submenu;
@@ -83,7 +91,9 @@ void FruityMenu::closeSub() {
 // ── Private rendering ────────────────────────────────────────────────
 
 void FruityMenu::render() {
-    if (!_display) return;
+    if (!_display) {
+        return;
+    }
 
     _display->clearDisplay();
     _display->setTextSize(1);
@@ -99,9 +109,11 @@ void FruityMenu::render() {
 
     // Calculate pagination
     uint8_t maxVisible = (DISPLAY_H - y) / PX_PER_LINE;
-    if (maxVisible == 0) return;
+    if (maxVisible == 0) {
+        return;
+    }
 
-    uint8_t page     = _selection / maxVisible;
+    uint8_t page = _selection / maxVisible;
     uint8_t startIdx = page * maxVisible;
 
     for (uint8_t i = 0; i < maxVisible && (startIdx + i) < _count; i++) {

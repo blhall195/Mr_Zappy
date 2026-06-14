@@ -1,19 +1,18 @@
 #include "menu_manager.h"
 #include "config.h"
 
-MenuManager* MenuManager::s_instance = nullptr;
+MenuManager *MenuManager::s_instance = nullptr;
 
 // ── Public API ───────────────────────────────────────────────────────
 
-void MenuManager::begin(Adafruit_SH1107& display, DeviceContext& ctx,
-                         ConfigManager& cfgMgr) {
-    _display  = &display;
-    _ctx      = &ctx;
-    _cfgMgr   = &cfgMgr;
-    _active     = true;
+void MenuManager::begin(Adafruit_SH1107 &display, DeviceContext &ctx, ConfigManager &cfgMgr) {
+    _display = &display;
+    _ctx = &ctx;
+    _cfgMgr = &cfgMgr;
+    _active = true;
     _exitAction = MenuExitAction::NONE;
     _lastActivity = millis();
-    _entryTime    = millis();
+    _entryTime = millis();
     s_instance = this;
 
     Serial.println(F("Menu mode active"));
@@ -21,8 +20,10 @@ void MenuManager::begin(Adafruit_SH1107& display, DeviceContext& ctx,
     _root.show();
 }
 
-void MenuManager::update(ButtonManager& buttons) {
-    if (!_active) return;
+void MenuManager::update(ButtonManager &buttons) {
+    if (!_active) {
+        return;
+    }
 
     // ── Grace period: ignore inputs briefly after entry so the CALIB
     //    press that opened the menu doesn't immediately select "Exit" ──
@@ -38,10 +39,8 @@ void MenuManager::update(ButtonManager& buttons) {
 
     // ── Viewing cal metrics overlay: any button returns to menu ──
     if (_viewingCalMetrics) {
-        if (buttons.wasPressed(Button::MEASURE) ||
-            buttons.wasPressed(Button::DISCO)   ||
-            buttons.wasPressed(Button::CALIB)   ||
-            buttons.wasPressed(Button::FIRE)    ||
+        if (buttons.wasPressed(Button::MEASURE) || buttons.wasPressed(Button::DISCO) ||
+            buttons.wasPressed(Button::CALIB) || buttons.wasPressed(Button::FIRE) ||
             buttons.wasPressed(Button::SHUTDOWN)) {
             _viewingCalMetrics = false;
             _lastActivity = millis();
@@ -79,7 +78,9 @@ void MenuManager::update(ButtonManager& buttons) {
 
     if (interacted) {
         _lastActivity = millis();
-        if (!_viewingCalMetrics) _root.show();
+        if (!_viewingCalMetrics) {
+            _root.show();
+        }
     }
 
     // Auto shutdown
@@ -99,11 +100,9 @@ void MenuManager::buildMenu() {
 
     uint32_t lt = _ctx->config.laserTimeout;
     if (lt >= 61) {
-        snprintf(_laserLabel, sizeof(_laserLabel), "Laser off: %lu min",
-                 (unsigned long)(lt / 60));
+        snprintf(_laserLabel, sizeof(_laserLabel), "Laser off: %lu min", (unsigned long)(lt / 60));
     } else {
-        snprintf(_laserLabel, sizeof(_laserLabel), "Laser off: %lu Sec",
-                 (unsigned long)lt);
+        snprintf(_laserLabel, sizeof(_laserLabel), "Laser off: %lu Sec", (unsigned long)lt);
     }
 
     snprintf(_shutdownLabel, sizeof(_shutdownLabel), "Shutdown: %lu min",
@@ -162,28 +161,28 @@ void MenuManager::buildMenu() {
     // ── Laser Timeout submenu ────────────────────────────────────
     _laserSub.addAction("30 sec", setLaserTimeout, 30);
     _laserSub.addAction("60 sec", setLaserTimeout, 60);
-    _laserSub.addAction("2 min",  setLaserTimeout, 120);
-    _laserSub.addAction("5 min",  setLaserTimeout, 300);
+    _laserSub.addAction("2 min", setLaserTimeout, 120);
+    _laserSub.addAction("5 min", setLaserTimeout, 300);
     _laserSub.addAction("15 min", setLaserTimeout, 900);
     _laserSub.addAction("30 min", setLaserTimeout, 1800);
     _laserSub.addAction("<- Back", goToSettings);
 
     // ── Auto Shutdown submenu ────────────────────────────────────
-    _shutdownSub.addAction("5 min",  setAutoShutdown, 300);
+    _shutdownSub.addAction("5 min", setAutoShutdown, 300);
     _shutdownSub.addAction("10 min", setAutoShutdown, 600);
     _shutdownSub.addAction("15 min", setAutoShutdown, 900);
     _shutdownSub.addAction("30 min", setAutoShutdown, 1800);
     _shutdownSub.addAction("60 min", setAutoShutdown, 3600);
-    _shutdownSub.addAction("2 hr",   setAutoShutdown, 7200);
+    _shutdownSub.addAction("2 hr", setAutoShutdown, 7200);
     _shutdownSub.addAction("<- Back", goToSettings);
 
     // ── Screen Brightness submenu ─────────────────────────────────
-    _brightnessSub.addAction("1%",   setScreenBrightness, 3);
-    _brightnessSub.addAction("5%",   setScreenBrightness, 13);
-    _brightnessSub.addAction("10%",  setScreenBrightness, 26);
-    _brightnessSub.addAction("25%",  setScreenBrightness, 64);
-    _brightnessSub.addAction("50%",  setScreenBrightness, 128);
-    _brightnessSub.addAction("75%",  setScreenBrightness, 191);
+    _brightnessSub.addAction("1%", setScreenBrightness, 3);
+    _brightnessSub.addAction("5%", setScreenBrightness, 13);
+    _brightnessSub.addAction("10%", setScreenBrightness, 26);
+    _brightnessSub.addAction("25%", setScreenBrightness, 64);
+    _brightnessSub.addAction("50%", setScreenBrightness, 128);
+    _brightnessSub.addAction("75%", setScreenBrightness, 191);
     _brightnessSub.addAction("100%", setScreenBrightness, 255);
     _brightnessSub.addAction("<- Back", goToSettings);
 
@@ -215,38 +214,50 @@ void MenuManager::buildMenu() {
 // ── Static callbacks ─────────────────────────────────────────────────
 
 void MenuManager::goToRoot(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_root.closeSub();
 }
 
 void MenuManager::goToSettings(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_settingsSub.closeSub();
 }
 
 void MenuManager::enterPart1Calibration(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: entering Part 1 (Ellipsoid) calibration"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_PART1_CALIB;
 }
 
 void MenuManager::enterPart2Calibration(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: entering Part 2 (Alignment) calibration"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_PART2_CALIB;
 }
 
 void MenuManager::enterShortCalibration(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: entering short calibration"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_SHORT_CALIB;
 }
 
 void MenuManager::setAnomalyOn(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_ctx->config.anomalyDetection = true;
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
     Serial.println(F("Menu: anomaly detection ON"));
@@ -254,7 +265,9 @@ void MenuManager::setAnomalyOn(int) {
 }
 
 void MenuManager::setAnomalyOff(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_ctx->config.anomalyDetection = false;
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
     Serial.println(F("Menu: anomaly detection OFF"));
@@ -262,7 +275,9 @@ void MenuManager::setAnomalyOff(int) {
 }
 
 void MenuManager::deletePending(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_cfgMgr->clearPendingReadings();
     s_instance->_ctx->bleDisconnectionCounter = 0;
     Serial.println(F("Menu: pending readings deleted"));
@@ -271,7 +286,9 @@ void MenuManager::deletePending(int) {
 }
 
 void MenuManager::setLaserTimeout(int value) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_ctx->config.laserTimeout = (uint32_t)value;
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
     Serial.print(F("Menu: laser timeout = "));
@@ -280,7 +297,9 @@ void MenuManager::setLaserTimeout(int value) {
 }
 
 void MenuManager::setAutoShutdown(int value) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_ctx->config.autoShutdownTimeout = (uint32_t)value;
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
     Serial.print(F("Menu: auto shutdown = "));
@@ -289,28 +308,36 @@ void MenuManager::setAutoShutdown(int value) {
 }
 
 void MenuManager::enterBootloader(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: entering bootloader for firmware update"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_BOOTLOADER;
 }
 
 void MenuManager::enterUsbDrive(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: entering USB drive mode for settings"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_USB_DRIVE;
 }
 
 void MenuManager::reformatFlash(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: reformatting flash (erase all)"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::REFORMAT_FLASH;
 }
 
 void MenuManager::setScreenBrightness(int value) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_ctx->config.screenBrightness = (uint8_t)value;
     s_instance->_display->setContrast((uint8_t)value);
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
@@ -320,17 +347,21 @@ void MenuManager::setScreenBrightness(int value) {
 }
 
 void MenuManager::enterFBCheck(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: entering F/B field check"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_FB_CHECK;
 }
 
 void MenuManager::viewLastCal(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
 
     ConfigManager::CalMetrics m;
-    auto& d = *s_instance->_display;
+    auto &d = *s_instance->_display;
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -370,14 +401,18 @@ void MenuManager::viewLastCal(int) {
 }
 
 void MenuManager::enterSnakeGame(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: launching snake game"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::ENTER_SNAKE;
 }
 
 void MenuManager::setMeasureFromFront(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_ctx->config.measureFromFront = true;
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
     Serial.println(F("Menu: measure from Front (raw laser distance)"));
@@ -385,7 +420,9 @@ void MenuManager::setMeasureFromFront(int) {
 }
 
 void MenuManager::setMeasureFromBack(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     s_instance->_ctx->config.measureFromFront = false;
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
     Serial.println(F("Menu: measure from Back (add device length offset)"));
@@ -393,7 +430,9 @@ void MenuManager::setMeasureFromBack(int) {
 }
 
 void MenuManager::exitMenu(int) {
-    if (!s_instance) return;
+    if (!s_instance) {
+        return;
+    }
     Serial.println(F("Menu: exiting to normal mode"));
     s_instance->_active = false;
     s_instance->_exitAction = MenuExitAction::RETURN_NORMAL;

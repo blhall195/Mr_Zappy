@@ -3,28 +3,26 @@
 
 // ── Initialization ──────────────────────────────────────────────────
 
-void CalibrationMode::begin(
-    ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
-    LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
-    ConfigManager& cfgMgr, MagCal::Calibration& cal,
-    const Config& config, CalMode mode)
-{
-    btns_      = &btns;
-    disp_      = &disp;
-    disco_     = &disco;
-    laser_     = &laser;
+void CalibrationMode::begin(ButtonManager &btns, DisplayManager &disp, DiscoManager &disco,
+                            LaserEgismos &laser, RM3100 &magSensor, Adafruit_ISM330DHCX &imu,
+                            ConfigManager &cfgMgr, MagCal::Calibration &cal, const Config &config,
+                            CalMode mode) {
+    btns_ = &btns;
+    disp_ = &disp;
+    disco_ = &disco;
+    laser_ = &laser;
     magSensor_ = &magSensor;
-    imu_       = &imu;
-    cfgMgr_    = &cfgMgr;
-    cal_       = &cal;
+    imu_ = &imu;
+    cfgMgr_ = &cfgMgr;
+    cal_ = &cal;
 
     // Apply consistency settings from config
-    bufferLen_     = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
-    magThreshold_  = config.calMagConsistency;
+    bufferLen_ = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
+    magThreshold_ = config.calMagConsistency;
     gravThreshold_ = config.calGravConsistency;
-    settleMs_      = config.calSettleMs;
-    calEmaAlpha_   = config.calEmaAlpha;
-    calTimeoutMs_  = config.calTimeoutMs;
+    settleMs_ = config.calSettleMs;
+    calEmaAlpha_ = config.calEmaAlpha;
+    calTimeoutMs_ = config.calTimeoutMs;
 
     // Clear data
     magArray_.clear();
@@ -80,31 +78,59 @@ bool CalibrationMode::update() {
     updateBeep();
 
     // Shutdown button: show confirmation screen instead of immediate power-off
-    if (btns_->wasPressed(Button::SHUTDOWN) &&
-        state_ != CalibState::SHUTDOWN_CONFIRM) {
+    if (btns_->wasPressed(Button::SHUTDOWN) && state_ != CalibState::SHUTDOWN_CONFIRM) {
         requestShutdown();
         return false;
     }
 
     switch (state_) {
-        case CalibState::INTRO_ELLIPSOID:
-        case CalibState::INTRO_ALIGNMENT:     updateIntro(); break;
-        case CalibState::COLLECTING_ELLIPSOID:
-        case CalibState::COLLECTING_ALIGNMENT: updateCollecting(); break;
-        case CalibState::CALCULATING_ELLIPSOID:  updateCalculatingEllipsoid(); break;
-        case CalibState::CALCULATING_ALIGNMENT:  updateCalculatingAlignment(); break;
-        case CalibState::CALCULATING_SHORT:      updateCalculatingShort(); break;
-        case CalibState::SHOW_RESULTS:         updateShowResults(); break;
-        case CalibState::SAVING:               updateSaving(); break;
-        case CalibState::FB_INTRO:             updateFBIntro(); break;
-        case CalibState::FB_WAIT_FORESIGHT:
-        case CalibState::FB_WAIT_BACKSIGHT:    updateFBWaitShot(); break;
-        case CalibState::FB_PAIR_RESULT:       updateFBPairResult(); break;
-        case CalibState::FB_CALCULATING:       updateFBCalculating(); break;
-        case CalibState::FB_RESULTS:           updateFBResults(); break;
-        case CalibState::FB_SAVING:            updateFBSaving(); break;
-        case CalibState::SHUTDOWN_CONFIRM:     updateShutdownConfirm(); break;
-        default: break;
+    case CalibState::INTRO_ELLIPSOID:
+    case CalibState::INTRO_ALIGNMENT:
+        updateIntro();
+        break;
+    case CalibState::COLLECTING_ELLIPSOID:
+    case CalibState::COLLECTING_ALIGNMENT:
+        updateCollecting();
+        break;
+    case CalibState::CALCULATING_ELLIPSOID:
+        updateCalculatingEllipsoid();
+        break;
+    case CalibState::CALCULATING_ALIGNMENT:
+        updateCalculatingAlignment();
+        break;
+    case CalibState::CALCULATING_SHORT:
+        updateCalculatingShort();
+        break;
+    case CalibState::SHOW_RESULTS:
+        updateShowResults();
+        break;
+    case CalibState::SAVING:
+        updateSaving();
+        break;
+    case CalibState::FB_INTRO:
+        updateFBIntro();
+        break;
+    case CalibState::FB_WAIT_FORESIGHT:
+    case CalibState::FB_WAIT_BACKSIGHT:
+        updateFBWaitShot();
+        break;
+    case CalibState::FB_PAIR_RESULT:
+        updateFBPairResult();
+        break;
+    case CalibState::FB_CALCULATING:
+        updateFBCalculating();
+        break;
+    case CalibState::FB_RESULTS:
+        updateFBResults();
+        break;
+    case CalibState::FB_SAVING:
+        updateFBSaving();
+        break;
+    case CalibState::SHUTDOWN_CONFIRM:
+        updateShutdownConfirm();
+        break;
+    default:
+        break;
     }
 
     return (state_ == CalibState::DONE);
@@ -114,10 +140,8 @@ bool CalibrationMode::update() {
 
 void CalibrationMode::updateIntro() {
     // Dismiss intro screen on any button press
-    if (btns_->wasPressed(Button::MEASURE) ||
-        btns_->wasPressed(Button::DISCO)   ||
-        btns_->wasPressed(Button::CALIB)   ||
-        btns_->wasPressed(Button::FIRE)) {
+    if (btns_->wasPressed(Button::MEASURE) || btns_->wasPressed(Button::DISCO) ||
+        btns_->wasPressed(Button::CALIB) || btns_->wasPressed(Button::FIRE)) {
 
         if (state_ == CalibState::INTRO_ELLIPSOID) {
             // Start ellipsoid collection
@@ -158,7 +182,9 @@ void CalibrationMode::updateIntro() {
 void CalibrationMode::updateCollecting() {
     // Sample sensors at ~100 Hz
     uint32_t now = millis();
-    if (now - lastSampleTime_ < 10) return;
+    if (now - lastSampleTime_ < 10) {
+        return;
+    }
     lastSampleTime_ = now;
 
     // Read raw sensor data
@@ -171,7 +197,7 @@ void CalibrationMode::updateCollecting() {
         emaGrav_ = gravReading;
         emaInitialized_ = true;
     } else {
-        emaMag_  = calEmaAlpha_ * magReading  + (1.0f - calEmaAlpha_) * emaMag_;
+        emaMag_ = calEmaAlpha_ * magReading + (1.0f - calEmaAlpha_) * emaMag_;
         emaGrav_ = calEmaAlpha_ * gravReading + (1.0f - calEmaAlpha_) * emaGrav_;
     }
 
@@ -179,7 +205,9 @@ void CalibrationMode::updateCollecting() {
     magBuffer_[bufferIdx_] = emaMag_;
     gravBuffer_[bufferIdx_] = emaGrav_;
     bufferIdx_ = (bufferIdx_ + 1) % bufferLen_;
-    if (bufferCount_ < bufferLen_) bufferCount_++;
+    if (bufferCount_ < bufferLen_) {
+        bufferCount_++;
+    }
 
     // MEASURE button starts a capture attempt
     if (btns_->wasPressed(Button::MEASURE) && !waitingForStable_) {
@@ -243,7 +271,7 @@ void CalibrationMode::updateCollecting() {
 
             // Wait for settle duration before accepting
             if (now - settleStart_ < settleMs_) {
-                return;  // keep accumulating
+                return; // keep accumulating
             }
 
             // Settle complete — record the averaged point
@@ -272,7 +300,7 @@ void CalibrationMode::updateCollecting() {
 
 void CalibrationMode::updateCalculatingEllipsoid() {
     // Show calculating message
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
     d.setTextSize(2);
@@ -292,7 +320,7 @@ void CalibrationMode::updateCalculatingEllipsoid() {
 
 void CalibrationMode::updateCalculatingAlignment() {
     // Show calculating message
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
     d.setTextSize(2);
@@ -310,7 +338,7 @@ void CalibrationMode::updateCalculatingAlignment() {
 
 void CalibrationMode::updateCalculatingShort() {
     // Show calculating message
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
     d.setTextSize(2);
@@ -348,7 +376,7 @@ void CalibrationMode::updateShowResults() {
         holdCounter_ += 0.01f;
         if (holdCounter_ >= HOLD_TIME) {
             Serial.println(F("Calibration discarded — rebooting to restore saved cal."));
-            auto& d = disp_->getDisplay();
+            auto &d = disp_->getDisplay();
             d.clearDisplay();
             d.setTextColor(SH110X_WHITE);
             d.setTextSize(2);
@@ -368,7 +396,7 @@ void CalibrationMode::updateShowResults() {
 // ── State: SAVING ───────────────────────────────────────────────────
 
 void CalibrationMode::updateSaving() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     if (saveCalibration()) {
         Serial.println(F("Calibration saved to flash."));
 
@@ -415,7 +443,7 @@ void CalibrationMode::updateSaving() {
     }
 
     // Final save complete — reboot to cleanly load new calibration
-    auto& d2 = disp_->getDisplay();
+    auto &d2 = disp_->getDisplay();
     d2.clearDisplay();
     d2.setTextColor(SH110X_WHITE);
     d2.setTextSize(2);
@@ -429,7 +457,7 @@ void CalibrationMode::updateSaving() {
 
 // ── Sensor reading ──────────────────────────────────────────────────
 
-void CalibrationMode::readSensors(Eigen::Vector3f& mag, Eigen::Vector3f& grav) {
+void CalibrationMode::readSensors(Eigen::Vector3f &mag, Eigen::Vector3f &grav) {
     // Read magnetometer
     RM3100::Reading mr = magSensor_->readSingle();
     float mx, my, mz;
@@ -444,8 +472,7 @@ void CalibrationMode::readSensors(Eigen::Vector3f& mag, Eigen::Vector3f& grav) {
 
 // ── Consistency check ───────────────────────────────────────────────
 
-bool CalibrationMode::isConsistent(const Eigen::Vector3f* buffer, int count,
-                                   float threshold) const {
+bool CalibrationMode::isConsistent(const Eigen::Vector3f *buffer, int count, float threshold) const {
     // Angular consistency: threshold is in degrees.
     // Orientation-independent — same hand wobble passes/fails regardless of heading.
     Eigen::Vector3f ref = buffer[0].normalized();
@@ -459,23 +486,27 @@ bool CalibrationMode::isConsistent(const Eigen::Vector3f* buffer, int count,
     return true;
 }
 
-Eigen::Vector3f CalibrationMode::average(const Eigen::Vector3f* buffer, int count) const {
+Eigen::Vector3f CalibrationMode::average(const Eigen::Vector3f *buffer, int count) const {
     Eigen::Vector3f sum = Eigen::Vector3f::Zero();
-    for (int i = 0; i < count; i++) sum += buffer[i];
+    for (int i = 0; i < count; i++) {
+        sum += buffer[i];
+    }
     return sum / (float)count;
 }
 
-void CalibrationMode::recordPoint(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav) {
+void CalibrationMode::recordPoint(const Eigen::Vector3f &mag, const Eigen::Vector3f &grav) {
     magArray_.push_back(mag);
     gravArray_.push_back(grav);
 }
 
 // ── Coverage bar ────────────────────────────────────────────────────
 
-void CalibrationMode::updateCoverageBar(const Eigen::Vector3f& grav) {
+void CalibrationMode::updateCoverageBar(const Eigen::Vector3f &grav) {
     // Map gravity vector to coverage zone
     float magnitude = grav.norm();
-    if (magnitude < 0.001f) return;
+    if (magnitude < 0.001f) {
+        return;
+    }
 
     float nz = grav[2] / magnitude;
     float elevation = asinf(fmaxf(-1.0f, fminf(1.0f, nz))) * (180.0f / M_PI);
@@ -489,7 +520,7 @@ void CalibrationMode::updateCoverageBar(const Eigen::Vector3f& grav) {
     coverageZones_[row][col] = true;
 }
 
-void CalibrationMode::acceptPoint(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav) {
+void CalibrationMode::acceptPoint(const Eigen::Vector3f &mag, const Eigen::Vector3f &grav) {
     recordPoint(mag, grav);
 
     Serial.print(F("Accepted point "));
@@ -548,7 +579,7 @@ void CalibrationMode::acceptPoint(const Eigen::Vector3f& mag, const Eigen::Vecto
 // to avoid the measurement-layout template from DisplayManager::refresh().
 
 void CalibrationMode::showEllipsoidIntro() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -574,7 +605,7 @@ void CalibrationMode::showEllipsoidIntro() {
 }
 
 void CalibrationMode::showAlignmentIntro() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -605,7 +636,7 @@ void CalibrationMode::showAlignmentIntro() {
 }
 
 void CalibrationMode::showEllipsoidScreen() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -636,11 +667,11 @@ void CalibrationMode::showCoverageBar() {
     // Draw an 8-column coverage bar at bottom of display
     // Each column fills from bottom based on how many of 4 rows are covered
     // Bar area: x=8..119, y=84..111 (28 pixels tall, 4px per row + outline)
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
 
     const int barX = 8, barY = 84, barW = 112, barH = 28;
-    const int colW = barW / COV_COLS;   // 14px per column
-    const int rowH = 6;                 // height per coverage row
+    const int colW = barW / COV_COLS; // 14px per column
+    const int rowH = 6;               // height per coverage row
 
     // Outline
     d.drawRect(barX, barY, barW, barH, SH110X_WHITE);
@@ -648,8 +679,11 @@ void CalibrationMode::showCoverageBar() {
     // Fill columns based on coverage
     for (int c = 0; c < COV_COLS; c++) {
         int filled = 0;
-        for (int r = 0; r < COV_ROWS; r++)
-            if (coverageZones_[r][c]) filled++;
+        for (int r = 0; r < COV_ROWS; r++) {
+            if (coverageZones_[r][c]) {
+                filled++;
+            }
+        }
 
         if (filled > 0) {
             int fillH = filled * rowH;
@@ -666,9 +700,13 @@ void CalibrationMode::showCoverageBar() {
     // Print coverage to serial periodically
     if (iteration_ > 0 && iteration_ % 8 == 0) {
         int total = 0;
-        for (int r = 0; r < COV_ROWS; r++)
-            for (int cc = 0; cc < COV_COLS; cc++)
-                if (coverageZones_[r][cc]) total++;
+        for (int r = 0; r < COV_ROWS; r++) {
+            for (int cc = 0; cc < COV_COLS; cc++) {
+                if (coverageZones_[r][cc]) {
+                    total++;
+                }
+            }
+        }
         Serial.print(F("Coverage: "));
         Serial.print(total);
         Serial.println(F("/32 zones"));
@@ -676,7 +714,7 @@ void CalibrationMode::showCoverageBar() {
 }
 
 void CalibrationMode::showAlignmentProgress() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -710,7 +748,7 @@ void CalibrationMode::showAlignmentProgress() {
 }
 
 void CalibrationMode::showResultsScreen() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -773,7 +811,7 @@ void CalibrationMode::showResultsScreen() {
 }
 
 void CalibrationMode::showSavingScreen() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
     d.setTextSize(2);
@@ -858,11 +896,9 @@ void CalibrationMode::calculateAlignment() {
 
     // Build paired data from runs
     MagCal::PairedData pairedData;
-    for (const auto& run : runs) {
-        std::vector<Eigen::Vector3f> magSub(
-            magArray_.begin() + run.first, magArray_.begin() + run.second);
-        std::vector<Eigen::Vector3f> gravSub(
-            gravArray_.begin() + run.first, gravArray_.begin() + run.second);
+    for (const auto &run : runs) {
+        std::vector<Eigen::Vector3f> magSub(magArray_.begin() + run.first, magArray_.begin() + run.second);
+        std::vector<Eigen::Vector3f> gravSub(gravArray_.begin() + run.first, gravArray_.begin() + run.second);
         pairedData.push_back({magSub, gravSub});
     }
 
@@ -898,33 +934,30 @@ void CalibrationMode::calculateAlignment() {
 
 // ── F/B Check: Initialization ────────────────────────────────────
 
-void CalibrationMode::beginFBCheck(
-    ButtonManager& btns, DisplayManager& disp, DiscoManager& disco,
-    LaserEgismos& laser, RM3100& magSensor, Adafruit_ISM330DHCX& imu,
-    ConfigManager& cfgMgr, MagCal::Calibration& cal,
-    const Config& config)
-{
-    btns_      = &btns;
-    disp_      = &disp;
-    disco_     = &disco;
-    laser_     = &laser;
+void CalibrationMode::beginFBCheck(ButtonManager &btns, DisplayManager &disp, DiscoManager &disco,
+                                   LaserEgismos &laser, RM3100 &magSensor, Adafruit_ISM330DHCX &imu,
+                                   ConfigManager &cfgMgr, MagCal::Calibration &cal, const Config &config) {
+    btns_ = &btns;
+    disp_ = &disp;
+    disco_ = &disco;
+    laser_ = &laser;
     magSensor_ = &magSensor;
-    imu_       = &imu;
-    cfgMgr_    = &cfgMgr;
-    cal_       = &cal;
+    imu_ = &imu;
+    cfgMgr_ = &cfgMgr;
+    cal_ = &cal;
 
     // Apply consistency settings from config
-    bufferLen_     = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
-    magThreshold_  = config.calMagConsistency;
+    bufferLen_ = min((int)config.calBufferLength, MAX_BUFFER_SIZE);
+    magThreshold_ = config.calMagConsistency;
     gravThreshold_ = config.calGravConsistency;
-    settleMs_      = config.calSettleMs;
-    calEmaAlpha_   = config.calEmaAlpha;
-    calTimeoutMs_  = config.calTimeoutMs;
+    settleMs_ = config.calSettleMs;
+    calEmaAlpha_ = config.calEmaAlpha;
+    calTimeoutMs_ = config.calTimeoutMs;
 
     // Store config values for stability/leg checks
     fbStabilityTol_ = config.stabilityTolerance;
-    fbLegAngleTol_  = config.legAngleTolerance;
-    fbLaserWibble_  = config.laserWibble;
+    fbLegAngleTol_ = config.legAngleTolerance;
+    fbLaserWibble_ = config.laserWibble;
 
     // Clear FB data
     fbCount_ = 0;
@@ -965,10 +998,8 @@ void CalibrationMode::beginFBCheck(
 // ── F/B Check: State handlers ───────────────────────────────────
 
 void CalibrationMode::updateFBIntro() {
-    if (btns_->wasPressed(Button::MEASURE) ||
-        btns_->wasPressed(Button::DISCO)   ||
-        btns_->wasPressed(Button::CALIB)   ||
-        btns_->wasPressed(Button::FIRE)) {
+    if (btns_->wasPressed(Button::MEASURE) || btns_->wasPressed(Button::DISCO) ||
+        btns_->wasPressed(Button::CALIB) || btns_->wasPressed(Button::FIRE)) {
 
         state_ = CalibState::FB_WAIT_FORESIGHT;
         fbHasForesight_ = false;
@@ -984,7 +1015,9 @@ void CalibrationMode::updateFBIntro() {
 void CalibrationMode::updateFBWaitShot() {
     // Sample sensors at ~100 Hz and compute bearing
     uint32_t now = millis();
-    if (now - lastSampleTime_ < 10) return;
+    if (now - lastSampleTime_ < 10) {
+        return;
+    }
     lastSampleTime_ = now;
 
     Eigen::Vector3f magReading, gravReading;
@@ -997,18 +1030,28 @@ void CalibrationMode::updateFBWaitShot() {
         fbEmaSeeded_ = true;
     } else {
         float diff = rawBearing - fbEmaAz_;
-        if (diff > 180.0f)  diff -= 360.0f;
-        if (diff < -180.0f) diff += 360.0f;
+        if (diff > 180.0f) {
+            diff -= 360.0f;
+        }
+        if (diff < -180.0f) {
+            diff += 360.0f;
+        }
         fbEmaAz_ = fbEmaAz_ + fbEmaAlpha_ * diff;
-        if (fbEmaAz_ < 0.0f)   fbEmaAz_ += 360.0f;
-        if (fbEmaAz_ >= 360.0f) fbEmaAz_ -= 360.0f;
+        if (fbEmaAz_ < 0.0f) {
+            fbEmaAz_ += 360.0f;
+        }
+        if (fbEmaAz_ >= 360.0f) {
+            fbEmaAz_ -= 360.0f;
+        }
     }
     fbCurrentBearing_ = fbEmaAz_;
 
     // Push EMA-smoothed bearing into stability ring buffer
     fbStabBuf_[fbStabHead_] = fbCurrentBearing_;
     fbStabHead_ = (fbStabHead_ + 1) % FB_STAB_LEN;
-    if (fbStabCount_ < FB_STAB_LEN) fbStabCount_++;
+    if (fbStabCount_ < FB_STAB_LEN) {
+        fbStabCount_++;
+    }
 
     // Refresh display every 250ms
     if (now - fbLastDisplayTime_ >= 250) {
@@ -1085,8 +1128,9 @@ void CalibrationMode::updateFBWaitShot() {
             bool azOk = true;
             for (int i = 0; i < FB_LEG_LEN && azOk; i++) {
                 for (int j = i + 1; j < FB_LEG_LEN && azOk; j++) {
-                    if (circularDiff(fbLegBuf_[i], fbLegBuf_[j]) > fbLegAngleTol_)
+                    if (circularDiff(fbLegBuf_[i], fbLegBuf_[j]) > fbLegAngleTol_) {
                         azOk = false;
+                    }
                 }
             }
 
@@ -1097,9 +1141,11 @@ void CalibrationMode::updateFBWaitShot() {
 
                 // Compute spread (max circular diff among the 3 legs)
                 float spread = 0.0f;
-                for (int i = 0; i < FB_LEG_LEN; i++)
-                    for (int j = i + 1; j < FB_LEG_LEN; j++)
+                for (int i = 0; i < FB_LEG_LEN; i++) {
+                    for (int j = i + 1; j < FB_LEG_LEN; j++) {
                         spread = max(spread, circularDiff(fbLegBuf_[i], fbLegBuf_[j]));
+                    }
+                }
 
                 fbLegCount_ = 0;
 
@@ -1152,8 +1198,12 @@ void CalibrationMode::updateFBWaitShot() {
 
                     // Show pair error — wait for button press
                     float diff = fbCurrentFwd_ - finalBearing - 180.0f;
-                    while (diff > 180.0f)  diff -= 360.0f;
-                    while (diff < -180.0f) diff += 360.0f;
+                    while (diff > 180.0f) {
+                        diff -= 360.0f;
+                    }
+                    while (diff < -180.0f) {
+                        diff += 360.0f;
+                    }
                     float pairError = diff / 2.0f;
                     showFBPairResult(pairError, fbCurrentFwd_);
                     state_ = CalibState::FB_PAIR_RESULT;
@@ -1165,10 +1215,8 @@ void CalibrationMode::updateFBWaitShot() {
 
 void CalibrationMode::updateFBPairResult() {
     // Wait for any button press to continue
-    if (btns_->wasPressed(Button::MEASURE) ||
-        btns_->wasPressed(Button::DISCO)   ||
-        btns_->wasPressed(Button::CALIB)   ||
-        btns_->wasPressed(Button::FIRE)) {
+    if (btns_->wasPressed(Button::MEASURE) || btns_->wasPressed(Button::DISCO) ||
+        btns_->wasPressed(Button::CALIB) || btns_->wasPressed(Button::FIRE)) {
 
         disco_->turnOff();
 
@@ -1187,7 +1235,7 @@ void CalibrationMode::updateFBPairResult() {
 }
 
 void CalibrationMode::updateFBCalculating() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
     d.setTextSize(2);
@@ -1209,7 +1257,7 @@ void CalibrationMode::updateFBResults() {
         holdCounter_ += 0.01f;
         if (holdCounter_ >= HOLD_TIME) {
             Serial.println(F("FB: discarded — rebooting to restore saved cal."));
-            auto& d = disp_->getDisplay();
+            auto &d = disp_->getDisplay();
             d.clearDisplay();
             d.setTextColor(SH110X_WHITE);
             d.setTextSize(2);
@@ -1227,7 +1275,7 @@ void CalibrationMode::updateFBResults() {
 }
 
 void CalibrationMode::updateFBSaving() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
     d.setTextSize(2);
@@ -1256,7 +1304,7 @@ void CalibrationMode::updateFBSaving() {
     }
 
     // Reboot to cleanly load corrected calibration
-    auto& d2 = disp_->getDisplay();
+    auto &d2 = disp_->getDisplay();
     d2.clearDisplay();
     d2.setTextColor(SH110X_WHITE);
     d2.setTextSize(2);
@@ -1271,7 +1319,7 @@ void CalibrationMode::updateFBSaving() {
 // ── F/B Check: Display helpers ──────────────────────────────────
 
 void CalibrationMode::showFBIntroScreen() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -1294,7 +1342,7 @@ void CalibrationMode::showFBIntroScreen() {
 }
 
 void CalibrationMode::showFBLiveScreen() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -1350,7 +1398,7 @@ void CalibrationMode::showFBLiveScreen() {
 }
 
 void CalibrationMode::showFBPairResult(float error, float bearing) {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -1377,7 +1425,7 @@ void CalibrationMode::showFBPairResult(float error, float bearing) {
 }
 
 void CalibrationMode::showFBResultsScreen() {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -1400,18 +1448,23 @@ void CalibrationMode::showFBResultsScreen() {
     d.setCursor(0, 56);
     for (int i = 0; i < fbCount_ && i < 5; i++) {
         float diff = fbFwd_[i] - fbBwd_[i] - 180.0f;
-        while (diff > 180.0f)  diff -= 360.0f;
-        while (diff < -180.0f) diff += 360.0f;
+        while (diff > 180.0f) {
+            diff -= 360.0f;
+        }
+        while (diff < -180.0f) {
+            diff += 360.0f;
+        }
         float err = diff / 2.0f;
         float maxSpread = max(fbFwdSpread_[i], fbBwdSpread_[i]);
-        snprintf(buf, sizeof(buf), "%d: err:%.1f sprd:%.1f",
-                 i + 1, (double)err, (double)maxSpread);
+        snprintf(buf, sizeof(buf), "%d: err:%.1f sprd:%.1f", i + 1, (double)err, (double)maxSpread);
         d.println(buf);
     }
 
     // Exit hint
     int yHint = 56 + min(fbCount_, 5) * 10 + 6;
-    if (yHint > 100) yHint = 100;
+    if (yHint > 100) {
+        yHint = 100;
+    }
     d.setCursor(0, yHint);
     d.println(F("Hold B2: Discard+Restart"));
 
@@ -1426,43 +1479,60 @@ void CalibrationMode::showFBResultsScreen() {
 
 // ── F/B Check: Bearing helper ───────────────────────────────────
 
-float CalibrationMode::getBearing(const Eigen::Vector3f& mag, const Eigen::Vector3f& grav) {
+float CalibrationMode::getBearing(const Eigen::Vector3f &mag, const Eigen::Vector3f &grav) {
     MagCal::Angles angles = cal_->getAngles(mag, grav);
     return angles.azimuth;
 }
 
 float CalibrationMode::circularDiff(float a, float b) {
     float d = a - b;
-    while (d > 180.0f)  d -= 360.0f;
-    while (d < -180.0f) d += 360.0f;
+    while (d > 180.0f) {
+        d -= 360.0f;
+    }
+    while (d < -180.0f) {
+        d += 360.0f;
+    }
     return fabsf(d);
 }
 
 bool CalibrationMode::fbBearingStable(float tolerance) const {
-    if (fbStabCount_ < FB_STAB_LEN) return false;
+    if (fbStabCount_ < FB_STAB_LEN) {
+        return false;
+    }
     for (int i = 0; i < FB_STAB_LEN; i++) {
         for (int j = i + 1; j < FB_STAB_LEN; j++) {
-            if (circularDiff(fbStabBuf_[i], fbStabBuf_[j]) > tolerance)
+            if (circularDiff(fbStabBuf_[i], fbStabBuf_[j]) > tolerance) {
                 return false;
+            }
         }
     }
     return true;
 }
 
-float CalibrationMode::fbCircularAverage(const float* buf, int count) const {
-    if (count <= 0) return 0.0f;
+float CalibrationMode::fbCircularAverage(const float *buf, int count) const {
+    if (count <= 0) {
+        return 0.0f;
+    }
     // Use first element as reference to handle wraparound
     float ref = buf[0];
     float sum = 0.0f;
     for (int i = 0; i < count; i++) {
         float diff = buf[i] - ref;
-        while (diff > 180.0f)  diff -= 360.0f;
-        while (diff < -180.0f) diff += 360.0f;
+        while (diff > 180.0f) {
+            diff -= 360.0f;
+        }
+        while (diff < -180.0f) {
+            diff += 360.0f;
+        }
         sum += diff;
     }
     float avg = ref + sum / count;
-    while (avg >= 360.0f) avg -= 360.0f;
-    while (avg < 0.0f)    avg += 360.0f;
+    while (avg >= 360.0f) {
+        avg -= 360.0f;
+    }
+    while (avg < 0.0f) {
+        avg += 360.0f;
+    }
     return avg;
 }
 
@@ -1488,10 +1558,8 @@ void CalibrationMode::updateShutdownConfirm() {
     static constexpr uint32_t DISPLAY_UPDATE_MS = 80;
 
     // Any other button cancels
-    if (btns_->wasPressed(Button::MEASURE) ||
-        btns_->wasPressed(Button::DISCO)   ||
-        btns_->wasPressed(Button::CALIB)   ||
-        btns_->wasPressed(Button::FIRE)) {
+    if (btns_->wasPressed(Button::MEASURE) || btns_->wasPressed(Button::DISCO) ||
+        btns_->wasPressed(Button::CALIB) || btns_->wasPressed(Button::FIRE)) {
         Serial.println(F("Calibration: shutdown cancelled"));
         shutdownHoldStart_ = 0;
         state_ = preShutdownState_;
@@ -1502,7 +1570,9 @@ void CalibrationMode::updateShutdownConfirm() {
     uint32_t now = millis();
 
     if (btns_->isPressed(Button::SHUTDOWN)) {
-        if (shutdownHoldStart_ == 0) shutdownHoldStart_ = now;
+        if (shutdownHoldStart_ == 0) {
+            shutdownHoldStart_ = now;
+        }
         uint32_t heldMs = now - shutdownHoldStart_;
 
         // Update progress bar periodically while holding
@@ -1515,7 +1585,9 @@ void CalibrationMode::updateShutdownConfirm() {
         if (heldMs >= HOLD_SHUTDOWN_MS) {
             Serial.println(F("Calibration: shutdown confirmed (hold)"));
             digitalWrite(PIN_POWER, LOW);
-            while (true) { delay(1000); }
+            while (true) {
+                delay(1000);
+            }
         }
     } else {
         // Released before hold completed — reset and redraw static screen
@@ -1527,7 +1599,7 @@ void CalibrationMode::updateShutdownConfirm() {
 }
 
 void CalibrationMode::showShutdownConfirmScreen(uint8_t holdPct) {
-    auto& d = disp_->getDisplay();
+    auto &d = disp_->getDisplay();
     d.clearDisplay();
     d.setTextColor(SH110X_WHITE);
 
@@ -1551,7 +1623,9 @@ void CalibrationMode::showShutdownConfirmScreen(uint8_t holdPct) {
         const int barX = 0, barY = 118, barW = 128, barH = 8;
         d.drawRect(barX, barY, barW, barH, SH110X_WHITE);
         int fillW = (int)(barW * holdPct / 100);
-        if (fillW > 2) d.fillRect(barX + 1, barY + 1, fillW - 2, barH - 2, SH110X_WHITE);
+        if (fillW > 2) {
+            d.fillRect(barX + 1, barY + 1, fillW - 2, barH - 2, SH110X_WHITE);
+        }
     }
 
     d.display();
@@ -1559,16 +1633,33 @@ void CalibrationMode::showShutdownConfirmScreen(uint8_t holdPct) {
 
 void CalibrationMode::redrawScreen(CalibState s) {
     switch (s) {
-        case CalibState::INTRO_ELLIPSOID:      showEllipsoidIntro();    break;
-        case CalibState::INTRO_ALIGNMENT:      showAlignmentIntro();    break;
-        case CalibState::COLLECTING_ELLIPSOID: showEllipsoidScreen();   break;
-        case CalibState::COLLECTING_ALIGNMENT: showAlignmentProgress(); break;
-        case CalibState::SHOW_RESULTS:         showResultsScreen();     break;
-        case CalibState::FB_INTRO:             showFBIntroScreen();     break;
-        case CalibState::FB_WAIT_FORESIGHT:
-        case CalibState::FB_WAIT_BACKSIGHT:    showFBLiveScreen();      break;
-        case CalibState::FB_RESULTS:           showFBResultsScreen();   break;
-        default: break;
+    case CalibState::INTRO_ELLIPSOID:
+        showEllipsoidIntro();
+        break;
+    case CalibState::INTRO_ALIGNMENT:
+        showAlignmentIntro();
+        break;
+    case CalibState::COLLECTING_ELLIPSOID:
+        showEllipsoidScreen();
+        break;
+    case CalibState::COLLECTING_ALIGNMENT:
+        showAlignmentProgress();
+        break;
+    case CalibState::SHOW_RESULTS:
+        showResultsScreen();
+        break;
+    case CalibState::FB_INTRO:
+        showFBIntroScreen();
+        break;
+    case CalibState::FB_WAIT_FORESIGHT:
+    case CalibState::FB_WAIT_BACKSIGHT:
+        showFBLiveScreen();
+        break;
+    case CalibState::FB_RESULTS:
+        showFBResultsScreen();
+        break;
+    default:
+        break;
     }
 }
 
