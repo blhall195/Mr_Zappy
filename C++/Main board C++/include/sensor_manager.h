@@ -1,6 +1,7 @@
 #pragma once
 // Sensor fusion: direct angle calculation from mag + accel, EMA output smoothing.
 
+#include "leg_checker.h"
 #include "mag_cal/calibration.h"
 #include <ArduinoEigenDense.h>
 
@@ -20,11 +21,9 @@ class SensorManager {
     float getRoll() const { return roll_; }
 
     // ── Stability detection ──────────────────────────────────────────
-    bool isStable(float tolerance) const;
+    bool isStable(const ILegChecker &checker) const;
     void resetStability();
 
-    /// Wraparound-safe angular distance (0–180)
-    static float circularDiff(float a, float b);
 
   private:
     // EMA-smoothed output angles

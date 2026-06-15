@@ -3,11 +3,16 @@ name: Build BLE Firmware
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -20,21 +25,13 @@ jobs:
           key: ${{ runner.os }}-pio
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.1.19
 
       - name: Build BLE board
-        run: platformio run
-        working-directory: "C++/DiscoX C++ BLE"
-
-      - name: Convert BLE board to UF2
-        run: |
-          python3 tools/uf2conv.py \
-            "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.hex" \
-            --family 0xada52840 --convert \
-            --output "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"
+        run: ./build.sh ble
 
       - name: Upload BLE board UF2
         uses: actions/upload-artifact@v4
         with:
           name: ble-board-${{ github.run_number }}
-          path: "C++/DiscoX C++ BLE/.pio/build/adafruit_itsybitsy_nrf52840/firmware.uf2"
+          path: build/ble.uf2

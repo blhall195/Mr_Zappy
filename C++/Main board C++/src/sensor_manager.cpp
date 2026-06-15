@@ -1,4 +1,6 @@
 #include "sensor_manager.h"
+#include "math_utils.h"
+#include "shot_vector.h"
 #include <cmath>
 
 // ── Initialisation ──────────────────────────────────────────────────
@@ -49,9 +51,9 @@ void SensorManager::update(const Eigen::Vector3f &rawMag, const Eigen::Vector3f 
         emaInc_ = filtInc;
         emaSeeded_ = true;
     } else {
-        float azErr = circularDiff(emaAz_, filtAz);
-        float incErr = fabsf(emaInc_ - filtInc);
-        if (azErr > jumpThreshold_ || incErr > jumpThreshold_) {
+        Shot prev(emaAz_, emaInc_, 1.0f);
+        Shot next(filtAz, filtInc, 1.0f);
+        if (radiansToDegrees(prev.angleTo(next)) > jumpThreshold_) {
             // Large discontinuity — snap to new value immediately
             emaAz_ = filtAz;
             emaInc_ = filtInc;
@@ -74,22 +76,7 @@ void SensorManager::update(const Eigen::Vector3f &rawMag, const Eigen::Vector3f 
 // Handles 0/360 wraparound by working in the shortest-arc direction.
 
 float SensorManager::circularEma(float prev, float next, float alpha) {
-    float diff = next - prev;
-    // Wrap to [-180, 180]
-    if (diff > 180.0f) {
-        diff -= 360.0f;
-    }
-    if (diff < -180.0f) {
-        diff += 360.0f;
-    }
-    float result = prev + alpha * diff;
-    if (result < 0.0f) {
-        result += 360.0f;
-    }
-    if (result >= 360.0f) {
-        result -= 360.0f;
-    }
-    return result;
+    return wrapTo360(prev + alpha * wrapTo180(next - prev));
 }
 
 // ── Stability ring buffer ───────────────────────────────────────────
@@ -103,35 +90,16 @@ void SensorManager::pushStability(float az, float inc) {
     }
 }
 
-bool SensorManager::isStable(float tolerance) const {
+bool SensorManager::isStable(const ILegChecker &checker) const {
     if (stabCount_ < stabLen_) {
         return false;
     }
 
-    // Check all pairwise circular azimuth differences
+    Shot shots[MAX_STAB_BUF];
     for (uint8_t i = 0; i < stabCount_; i++) {
-        for (uint8_t j = i + 1; j < stabCount_; j++) {
-            if (circularDiff(azBuf_[i], azBuf_[j]) > tolerance) {
-                return false;
-            }
-        }
+        shots[i] = Shot(azBuf_[i], incBuf_[i], 1.0f);
     }
-
-    // Inclination is linear — simple range check
-    float incMin = incBuf_[0], incMax = incBuf_[0];
-    for (uint8_t i = 1; i < stabCount_; i++) {
-        if (incBuf_[i] < incMin) {
-            incMin = incBuf_[i];
-        }
-        if (incBuf_[i] > incMax) {
-            incMax = incBuf_[i];
-        }
-    }
-    if ((incMax - incMin) > tolerance) {
-        return false;
-    }
-
-    return true;
+    return checker.hasValidLeg(shots, stabCount_);
 }
 
 void SensorManager::resetStability() {
@@ -165,23 +133,9 @@ float SensorManager::medianAzimuth() const {
     float ref = medAzBuf_[0];
     float vals[MEDIAN_LEN];
     for (uint8_t i = 0; i < MEDIAN_LEN; i++) {
-        float d = medAzBuf_[i] - ref;
-        if (d > 180.0f) {
-            d -= 360.0f;
-        }
-        if (d < -180.0f) {
-            d += 360.0f;
-        }
-        vals[i] = ref + d;
+        vals[i] = ref + wrapTo180(medAzBuf_[i] - ref);
     }
-    float med = medianN(vals, MEDIAN_LEN);
-    if (med < 0.0f) {
-        med += 360.0f;
-    }
-    if (med >= 360.0f) {
-        med -= 360.0f;
-    }
-    return med;
+    return wrapTo360(medianN(vals, MEDIAN_LEN));
 }
 
 float SensorManager::medianN(float *vals, uint8_t n) {
@@ -196,11 +150,4 @@ float SensorManager::medianN(float *vals, uint8_t n) {
         vals[j + 1] = key;
     }
     return vals[n / 2];
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-float SensorManager::circularDiff(float a, float b) {
-    float d = fmodf(a - b + 180.0f, 360.0f) - 180.0f;
-    return fabsf(d);
 }

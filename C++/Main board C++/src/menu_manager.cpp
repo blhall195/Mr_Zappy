@@ -111,6 +111,8 @@ void MenuManager::buildMenu() {
     uint8_t bpct = (uint8_t)((uint16_t)_ctx->config.screenBrightness * 100 / 255);
     snprintf(_brightnessLabel, sizeof(_brightnessLabel), "Brightness: %u%%", bpct);
 
+    snprintf(_cartesianLabel, sizeof(_cartesianLabel), "Leg tol: %dcm", (int)_ctx->config.cartesianTolerance);
+
     snprintf(_measureFromLabel, sizeof(_measureFromLabel), "Measure from: %s",
              _ctx->config.measureFromFront ? "Front" : "Back");
 
@@ -126,6 +128,7 @@ void MenuManager::buildMenu() {
     _firmwareSub.init(*_display, "Update Firmware");
     _measureFromSub.init(*_display, _measureFromLabel);
     _reformatSub.init(*_display, "Reformat (via USB)");
+    _cartesianSub.init(*_display, _cartesianLabel);
 
     // ── Root menu items ────────────────────────────────
     _root.addAction("Exit", exitMenu);
@@ -201,9 +204,24 @@ void MenuManager::buildMenu() {
     _settingsSub.addSubmenu(_anomalyLabel, &_anomalySub);
     _settingsSub.addSubmenu(_shutdownLabel, &_shutdownSub);
     _settingsSub.addSubmenu(_brightnessLabel, &_brightnessSub);
+    _settingsSub.addSubmenu(_cartesianLabel, &_cartesianSub);
     _settingsSub.addAction("Edit Settings File", enterUsbDrive);
     _settingsSub.addSubmenu("Reformat (via USB)", &_reformatSub);
     _settingsSub.addAction("<- Back", goToRoot);
+
+    // ── Cartesian tolerance submenu ──────────────────────────────────────
+    _cartesianSub.addAction("4 cm", setCartesianTolerance, 4);
+    _cartesianSub.addAction("5 cm", setCartesianTolerance, 5);
+    _cartesianSub.addAction("6 cm", setCartesianTolerance, 6);
+    _cartesianSub.addAction("7 cm", setCartesianTolerance, 7);
+    _cartesianSub.addAction("8 cm", setCartesianTolerance, 8);
+    _cartesianSub.addAction("9 cm", setCartesianTolerance, 9);
+    _cartesianSub.addAction("10 cm", setCartesianTolerance, 10);
+    _cartesianSub.addAction("15 cm", setCartesianTolerance, 15);
+    _cartesianSub.addAction("20 cm", setCartesianTolerance, 20);
+    _cartesianSub.addAction("25 cm", setCartesianTolerance, 25);
+    _cartesianSub.addAction("30 cm", setCartesianTolerance, 30);
+    _cartesianSub.addAction("<- Back", goToSettings);
 
     // ── Reformat submenu (recovery — opens USB mode to format on a PC) ──
     _reformatSub.addAction("No", goToSettings);
@@ -426,6 +444,19 @@ void MenuManager::setMeasureFromBack(int) {
     s_instance->_ctx->config.measureFromFront = false;
     s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
     Serial.println(F("Menu: measure from Back (add device length offset)"));
+    s_instance->buildMenu();
+}
+
+void MenuManager::setCartesianTolerance(int value) {
+    if (!s_instance) {
+        return;
+    }
+    s_instance->_ctx->config.cartesianTolerance = (float)value;
+    s_instance->_ctx->legChecker.setTolerance((float)value);
+    s_instance->_cfgMgr->saveConfig(s_instance->_ctx->config);
+    Serial.print(F("Menu: cartesian tolerance = "));
+    Serial.print(value);
+    Serial.println(F(" cm"));
     s_instance->buildMenu();
 }
 

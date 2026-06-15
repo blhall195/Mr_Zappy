@@ -41,7 +41,7 @@ class FruityMenu {
     void closeSub();
 
   private:
-    static constexpr uint8_t MAX_ITEMS = 10;
+    static constexpr uint8_t MAX_ITEMS = 15;
     static constexpr uint8_t PX_PER_LINE = 14;
     static constexpr uint8_t TEXT_X = 4;
     static constexpr uint8_t TEXT_Y_PAD = 3;

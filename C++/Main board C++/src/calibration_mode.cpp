@@ -1,4 +1,5 @@
 #include "calibration_mode.h"
+#include "math_utils.h"
 #include <math.h>
 
 // ── Initialization ──────────────────────────────────────────────────
@@ -509,8 +510,8 @@ void CalibrationMode::updateCoverageBar(const Eigen::Vector3f &grav) {
     }
 
     float nz = grav[2] / magnitude;
-    float elevation = asinf(fmaxf(-1.0f, fminf(1.0f, nz))) * (180.0f / M_PI);
-    float azimuth = fmodf(atan2f(grav[1], grav[0]) * (180.0f / M_PI) + 360.0f, 360.0f);
+    float elevation = radiansToDegrees(asinf(fmaxf(-1.0f, fminf(1.0f, nz))));
+    float azimuth = wrapTo360(radiansToDegrees(atan2f(grav[1], grav[0])));
 
     int row = (int)((elevation + 90.0f) / 45.0f);
     row = max(0, min(COV_ROWS - 1, row));
@@ -1029,20 +1030,8 @@ void CalibrationMode::updateFBWaitShot() {
         fbEmaAz_ = rawBearing;
         fbEmaSeeded_ = true;
     } else {
-        float diff = rawBearing - fbEmaAz_;
-        if (diff > 180.0f) {
-            diff -= 360.0f;
-        }
-        if (diff < -180.0f) {
-            diff += 360.0f;
-        }
-        fbEmaAz_ = fbEmaAz_ + fbEmaAlpha_ * diff;
-        if (fbEmaAz_ < 0.0f) {
-            fbEmaAz_ += 360.0f;
-        }
-        if (fbEmaAz_ >= 360.0f) {
-            fbEmaAz_ -= 360.0f;
-        }
+        float diff = wrapTo180(rawBearing - fbEmaAz_);
+        fbEmaAz_ = wrapTo360(fbEmaAz_ + fbEmaAlpha_ * diff);
     }
     fbCurrentBearing_ = fbEmaAz_;
 
@@ -1197,14 +1186,7 @@ void CalibrationMode::updateFBWaitShot() {
                     Serial.println(F(" complete"));
 
                     // Show pair error — wait for button press
-                    float diff = fbCurrentFwd_ - finalBearing - 180.0f;
-                    while (diff > 180.0f) {
-                        diff -= 360.0f;
-                    }
-                    while (diff < -180.0f) {
-                        diff += 360.0f;
-                    }
-                    float pairError = diff / 2.0f;
+                    float pairError = wrapTo180(fbCurrentFwd_ - finalBearing - 180.0f) / 2.0f;
                     showFBPairResult(pairError, fbCurrentFwd_);
                     state_ = CalibState::FB_PAIR_RESULT;
                 }
@@ -1447,14 +1429,7 @@ void CalibrationMode::showFBResultsScreen() {
     // Show per-pair: error and sensor spread (noise)
     d.setCursor(0, 56);
     for (int i = 0; i < fbCount_ && i < 5; i++) {
-        float diff = fbFwd_[i] - fbBwd_[i] - 180.0f;
-        while (diff > 180.0f) {
-            diff -= 360.0f;
-        }
-        while (diff < -180.0f) {
-            diff += 360.0f;
-        }
-        float err = diff / 2.0f;
+        float err = wrapTo180(fbFwd_[i] - fbBwd_[i] - 180.0f) / 2.0f;
         float maxSpread = max(fbFwdSpread_[i], fbBwdSpread_[i]);
         snprintf(buf, sizeof(buf), "%d: err:%.1f sprd:%.1f", i + 1, (double)err, (double)maxSpread);
         d.println(buf);
@@ -1484,16 +1459,6 @@ float CalibrationMode::getBearing(const Eigen::Vector3f &mag, const Eigen::Vecto
     return angles.azimuth;
 }
 
-float CalibrationMode::circularDiff(float a, float b) {
-    float d = a - b;
-    while (d > 180.0f) {
-        d -= 360.0f;
-    }
-    while (d < -180.0f) {
-        d += 360.0f;
-    }
-    return fabsf(d);
-}
 
 bool CalibrationMode::fbBearingStable(float tolerance) const {
     if (fbStabCount_ < FB_STAB_LEN) {
@@ -1517,23 +1482,9 @@ float CalibrationMode::fbCircularAverage(const float *buf, int count) const {
     float ref = buf[0];
     float sum = 0.0f;
     for (int i = 0; i < count; i++) {
-        float diff = buf[i] - ref;
-        while (diff > 180.0f) {
-            diff -= 360.0f;
-        }
-        while (diff < -180.0f) {
-            diff += 360.0f;
-        }
-        sum += diff;
+        sum += wrapTo180(buf[i] - ref);
     }
-    float avg = ref + sum / count;
-    while (avg >= 360.0f) {
-        avg -= 360.0f;
-    }
-    while (avg < 0.0f) {
-        avg += 360.0f;
-    }
-    return avg;
+    return wrapTo360(ref + sum / count);
 }
 
 // ── Shutdown confirmation ────────────────────────────────────────
