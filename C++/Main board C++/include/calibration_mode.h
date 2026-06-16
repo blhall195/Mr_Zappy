@@ -211,7 +211,6 @@ class CalibrationMode {
     float getBearing(const Eigen::Vector3f &mag, const Eigen::Vector3f &grav);
     bool fbBearingStable(float tolerance) const;
     float fbCircularAverage(const float *buf, int count) const;
-    static float circularDiff(float a, float b);
 
     // ── Display helpers ──
     void showEllipsoidIntro();

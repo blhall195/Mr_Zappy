@@ -1,6 +1,8 @@
 #pragma once
 
 #include "config.h"
+#include "leg_checker.h"
+#include "shot_buffer.h"
 #include <Arduino.h>
 
 // ── System states ───────────────────────────────────────────────────
@@ -26,7 +28,7 @@ struct Config {
     float emaAlphaStable = Defaults::emaAlphaStable;
     float emaAlphaMoving = Defaults::emaAlphaMoving;
     float legAngleTolerance = Defaults::legAngleTolerance;
-    float legDistanceTolerance = Defaults::legDistanceTolerance;
+    float cartesianTolerance = Defaults::cartesianTolerance;
     float laserDistanceOffset = Defaults::laserDistanceOffset;
     float calMagConsistency = Defaults::calMagConsistency;
     float calGravConsistency = Defaults::calGravConsistency;
@@ -73,11 +75,13 @@ struct DeviceContext {
     bool purpleLatched = false;
     bool displayFrozen = false; // true = show frozen shot readings, not live
 
-    // Stability buffers (fixed-size, index-managed)
-    float stableAzimuthBuf[3] = {};
-    float stableInclinationBuf[3] = {};
-    float stableDistanceBuf[3] = {};
-    uint8_t stableBufCount = 0;
+    // Leg-consistency buffer
+    CartesianLegChecker legChecker{Defaults::cartesianTolerance};
+    ShotBuffer shotBuf = ShotBuffer(legChecker);
+
+    // Stability checker (angular, tolerance in degrees)
+    AngularLegChecker stabilityChecker{Defaults::stabilityTolerance};
+    AngularLegChecker quickShotStabilityChecker{Defaults::quickShotStabilityTol};
 
     // (EMA state lives in SensorManager — complementary gravity filter + EMA smoothing)
 };

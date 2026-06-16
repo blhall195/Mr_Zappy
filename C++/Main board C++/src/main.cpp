@@ -8,6 +8,7 @@
 #include "display_manager.h"
 #include "laser_egismos.h"
 #include "mag_cal/calibration.h"
+#include "math_utils.h"
 #include "menu_manager.h"
 #include "rm3100.h"
 #include "sensor_manager.h"
@@ -191,9 +192,6 @@ static void handleMeasurementSuccess();
 static void alertError(const char *errCode);
 static void resetLaser();
 static void doShutdown();
-static float circularDiff(float a, float b);
-static bool bearingsWithinTol(const float *vals, uint8_t n, float tol);
-static bool linearWithinTol(const float *vals, uint8_t n, float tol);
 static void onFlushReading(float az, float inc, float dist);
 static void enterUsbDriveMode(); // USB MSC loop (does not return)
 
@@ -553,6 +551,8 @@ void loop() {
         delay(Timing::LOOP_INTERVAL_MS);
         return;
     }
+
+    // Mag Field Check (Foreshot/Backshot)
     if (menuMgr.exitAction() == MenuExitAction::ENTER_FB_CHECK) {
         menuMgr.clearExitAction();
         if (magOk && imuOk && dispOk && laserOk && calOk) {
@@ -567,6 +567,8 @@ void loop() {
         delay(Timing::LOOP_INTERVAL_MS);
         return;
     }
+
+    // Snake
     if (menuMgr.exitAction() == MenuExitAction::ENTER_SNAKE) {
         menuMgr.clearExitAction();
         if (dispOk) {
@@ -580,6 +582,8 @@ void loop() {
         delay(Timing::LOOP_INTERVAL_MS);
         return;
     }
+
+    // Update Firmware
     if (menuMgr.exitAction() == MenuExitAction::ENTER_BOOTLOADER) {
         menuMgr.clearExitAction();
         Serial.println(F("Entering UF2 bootloader..."));
@@ -601,13 +605,16 @@ void loop() {
             d.display();
             delay(3000);
         }
-// Write UF2 bootloader magic to end of RAM and reset
-// SAME51J19A: 192KB RAM at 0x20000000, so end-4 = 0x2002FFFC
+
+        // Write UF2 bootloader magic to end of RAM and reset
+        // SAME51J19A: 192KB RAM at 0x20000000, so end-4 = 0x2002FFFC
 #define BOOT_DOUBLE_TAP_ADDRESS (0x2002FFFCul)
         *((volatile uint32_t *)BOOT_DOUBLE_TAP_ADDRESS) = 0xf01669efUL;
         NVIC_SystemReset();
         // Does not return
     }
+
+    // Edit settings file
     if (menuMgr.exitAction() == MenuExitAction::ENTER_USB_DRIVE) {
         menuMgr.clearExitAction();
         Serial.println(F("Entering USB drive mode..."));
@@ -645,6 +652,8 @@ void loop() {
         NVIC_SystemReset();
         // Does not return
     }
+
+    // Reformat via USB
     if (menuMgr.exitAction() == MenuExitAction::REFORMAT_FLASH) {
         menuMgr.clearExitAction();
         // On-device FAT formatting can't work on this 2MB chip (SdFat's
@@ -673,7 +682,7 @@ void loop() {
         return;
     }
 
-    // ── Calibration mode: CalibrationMode owns the loop ──
+    //  Calibration mode
     if (calMode.isActive()) {
         bool done = calMode.update();
         if (done) {
@@ -1011,22 +1020,19 @@ static void pollMeasurement(uint32_t now) {
         // Ensure laser is on (only sends UART if it was off)
         if (!ctx.laserEnabled) {
             laser.setLaser(true);
-            delay(200);
+            delay(100);
             ctx.laserEnabled = true;
         }
         // Entry click buzzer
-        if (laserOk) {
-            laser.setBuzzer(true);
-            delay(100);
-            laser.setBuzzer(false);
-            delay(25);
-        }
+        laser.singleBeep();
         measRedLedSet = true;
     }
 
-    // Wait for stability — use wider tolerance for quick shot
-    float stabTol = ctx.quickShot ? Defaults::quickShotStabilityTol : ctx.config.stabilityTolerance;
-    if (!sensorMgr.isStable(stabTol)) {
+    const ILegChecker &stabChecker = ctx.quickShot
+                                         ? static_cast<const ILegChecker &>(ctx.quickShotStabilityChecker)
+                                         : ctx.stabilityChecker;
+
+    if (!sensorMgr.isStable(stabChecker)) {
         static uint32_t lastStabDbg = 0;
         uint32_t n = millis();
         if (n - lastStabDbg > 1000) {
@@ -1034,9 +1040,7 @@ static void pollMeasurement(uint32_t now) {
             Serial.print(F("MEAS: waiting stable  AZ="));
             Serial.print(sensorMgr.getAzimuth(), 1);
             Serial.print(F(" INC="));
-            Serial.print(sensorMgr.getInclination(), 1);
-            Serial.print(F(" tol="));
-            Serial.println(stabTol, 1);
+            Serial.println(sensorMgr.getInclination(), 1);
         }
         return;
     }
@@ -1074,6 +1078,7 @@ static void pollMeasurement(uint32_t now) {
     ctx.readings.distance =
         (distMm / 1000.0f) +
         (ctx.config.measureFromFront ? -Defaults::laserFrontOffset : ctx.config.laserDistanceOffset);
+
     lastDistance = ctx.readings.distance;
     Serial.print(F("MEAS: dist="));
     Serial.println(ctx.readings.distance, 3);
@@ -1192,71 +1197,36 @@ static void handleMeasurementSuccess() {
 
     Serial.println(F("  HS:3 leg buf"));
     Serial.flush();
-    uint8_t idx = ctx.stableBufCount;
-
-    if (idx < 3) {
-        // Buffer not full, add the readings to the end.
-        ctx.stableAzimuthBuf[idx] = ctx.readings.azimuth;
-        ctx.stableInclinationBuf[idx] = ctx.readings.inclination;
-        ctx.stableDistanceBuf[idx] = ctx.readings.distance;
-        ctx.stableBufCount++;
-    } else {
-        // Buffer full, discard oldest readings and shift the rest left to make room for the new ones.
-
-        // Shift Azimuth
-        ctx.stableAzimuthBuf[0] = ctx.stableAzimuthBuf[1];
-        ctx.stableAzimuthBuf[1] = ctx.stableAzimuthBuf[2];
-        // Shift Inclination
-        ctx.stableInclinationBuf[0] = ctx.stableInclinationBuf[1];
-        ctx.stableInclinationBuf[1] = ctx.stableInclinationBuf[2];
-        // Shift Distance
-        ctx.stableDistanceBuf[0] = ctx.stableDistanceBuf[1];
-        ctx.stableDistanceBuf[1] = ctx.stableDistanceBuf[2];
-
-        // Add the new readings
-        ctx.stableAzimuthBuf[2] = ctx.readings.azimuth;
-        ctx.stableInclinationBuf[2] = ctx.readings.inclination;
-        ctx.stableDistanceBuf[2] = ctx.readings.distance;
-    }
+    ctx.shotBuf.push(Shot(ctx.readings.azimuth, ctx.readings.inclination, ctx.readings.distance));
 
     Serial.println(F("  HS:4 leg check"));
     Serial.flush();
 
-    // Check leg completion when we have 3 readings
-    if (ctx.stableBufCount >= 3) {
-        bool azOk = bearingsWithinTol(ctx.stableAzimuthBuf, 3, ctx.config.legAngleTolerance);
-        bool incOk = linearWithinTol(ctx.stableInclinationBuf, 3, ctx.config.legAngleTolerance);
-        bool distOk = linearWithinTol(ctx.stableDistanceBuf, 3, ctx.config.legDistanceTolerance);
-
-        bool legComplete = azOk && incOk && distOk;
-
-        if (legComplete) {
-            // Triple buzz + white flash
-            for (int i = 0; i < 3; i++) {
-                laser.setBuzzer(true);
-                disco.setWhite();
-                delay(100);
-                laser.setBuzzer(false);
-                disco.turnOff();
-                delay(100);
-            }
-
-            // Laser wibble to indicate leg detected
-            if (ctx.config.laserWibble) {
-                laser.wibble();
-            }
-
-            // Clear buffers
-            ctx.stableBufCount = 0;
-
-            // Latch purple
-            disco.setPurple();
-            ctx.purpleLatched = true;
-            ctx.measurementTaken = true;
-
-            Serial.println(F("LEG COMPLETE — 3 consistent readings"));
-            return;
+    if (ctx.shotBuf.hasValidLeg()) {
+        // Triple buzz + white flash
+        for (int i = 0; i < 3; i++) {
+            laser.setBuzzer(true);
+            disco.setWhite();
+            delay(100);
+            laser.setBuzzer(false);
+            disco.turnOff();
+            delay(100);
         }
+
+        // Laser wibble to indicate leg detected
+        if (ctx.config.laserWibble) {
+            laser.wibble();
+        }
+
+        ctx.shotBuf.clear();
+
+        // Latch purple
+        disco.setPurple();
+        ctx.purpleLatched = true;
+        ctx.measurementTaken = true;
+
+        Serial.println(F("LEG COMPLETE — 3 consistent readings"));
+        return;
     }
 
     // Successful reading but leg not complete
@@ -1568,11 +1538,8 @@ static void updateDisplay(uint32_t now) {
             liveAz = sensorMgr.getAzimuth();
             liveInc = sensorMgr.getInclination();
         } else {
-            liveAz = atan2f(lastMagY, lastMagX) * (180.0f / PI);
-            if (liveAz < 0) {
-                liveAz += 360.0f;
-            }
-            liveInc = atan2f(lastAccZ, sqrtf(lastAccX * lastAccX + lastAccY * lastAccY)) * (180.0f / PI);
+            liveAz = wrapTo360(radiansToDegrees(atan2f(lastMagY, lastMagX)));
+            liveInc = radiansToDegrees(atan2f(lastAccZ, sqrtf(lastAccX * lastAccX + lastAccY * lastAccY)));
         }
 
         // Gyro-gated freeze: only update displayed values when device is moving.
@@ -1583,7 +1550,7 @@ static void updateDisplay(uint32_t now) {
             gyroStillSince = now; // reset settle timer
             anchored = false;
             // Device is moving — update displayed values (with deadband)
-            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE) {
+            if (circularDiff(liveAz, dispAz) > DEADBAND_ANGLE) {
                 dispAz = liveAz;
             }
             if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE) {
@@ -1591,7 +1558,7 @@ static void updateDisplay(uint32_t now) {
             }
         } else if ((now - gyroStillSince) < Defaults::gyroSettleMs) {
             // Still settling — keep updating so EMA can converge
-            if (SensorManager::circularDiff(liveAz, dispAz) > DEADBAND_ANGLE) {
+            if (circularDiff(liveAz, dispAz) > DEADBAND_ANGLE) {
                 dispAz = liveAz;
             }
             if (fabsf(liveInc - dispInc) > DEADBAND_ANGLE) {
@@ -1605,21 +1572,7 @@ static void updateDisplay(uint32_t now) {
                 anchored = true;
             }
             // Clamp azimuth to anchor ±0.1° (circular)
-            float azDiff = liveAz - anchorAz;
-            if (azDiff > 180.0f) {
-                azDiff -= 360.0f;
-            }
-            if (azDiff < -180.0f) {
-                azDiff += 360.0f;
-            }
-            float clampedAz = anchorAz + fmaxf(-0.1f, fminf(0.1f, azDiff));
-            if (clampedAz < 0.0f) {
-                clampedAz += 360.0f;
-            }
-            if (clampedAz >= 360.0f) {
-                clampedAz -= 360.0f;
-            }
-            dispAz = clampedAz;
+            dispAz = wrapTo360(anchorAz + fmaxf(-0.1f, fminf(0.1f, wrapTo180(liveAz - anchorAz))));
             // Clamp inclination to anchor ±0.1°
             float incDiff = liveInc - anchorInc;
             dispInc = anchorInc + fmaxf(-0.1f, fminf(0.1f, incDiff));
@@ -1676,32 +1629,6 @@ static void doShutdown() {
     }
 }
 
-static float circularDiff(float a, float b) {
-    float d = fmodf(a - b + 180.0f, 360.0f) - 180.0f;
-    return fabsf(d);
-}
-
-static bool bearingsWithinTol(const float *vals, uint8_t n, float tol) {
-    for (uint8_t i = 0; i < n; i++) {
-        for (uint8_t j = i + 1; j < n; j++) {
-            if (circularDiff(vals[i], vals[j]) > tol) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-static bool linearWithinTol(const float *vals, uint8_t n, float tol) {
-    for (uint8_t i = 0; i < n; i++) {
-        for (uint8_t j = i + 1; j < n; j++) {
-            if (fabsf(vals[i] - vals[j]) > tol) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
 
 static void onFlushReading(float az, float inc, float dist) {
     Serial.print(F("FLUSH: az="));
@@ -1825,6 +1752,8 @@ static void initFlash() {
             Serial.println(F("  No saved config — writing defaults"));
             configMgr.saveConfig(ctx.config);
         }
+        ctx.legChecker.setTolerance(ctx.config.cartesianTolerance);
+        ctx.stabilityChecker.setTolerance(ctx.config.stabilityTolerance);
 
         if (dispOk) {
             display.setBrightness(ctx.config.screenBrightness);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel)"
 MAIN_DIR="$REPO/C++/Main board C++"
@@ -9,7 +9,7 @@ BUILD="$REPO/build"
 
 build_main() {
     echo "=== Building main board ==="
-    pio run --project-dir "$MAIN_DIR"
+    pio run --project-dir "$MAIN_DIR" -e adafruit_feather_m4_can
     mkdir -p "$BUILD"
     python3 "$UF2CONV" \
         "$MAIN_DIR/.pio/build/adafruit_feather_m4_can/firmware.bin" \
