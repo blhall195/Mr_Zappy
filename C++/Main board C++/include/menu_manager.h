@@ -38,6 +38,7 @@ class MenuManager {
 
   private:
     void buildMenu();
+    void updateSplaysLabel();
 
     // Menu hierarchy (statically allocated, rebuilt on setting changes)
     FruityMenu _root;
@@ -61,6 +62,7 @@ class MenuManager {
     char _brightnessLabel[24];
     char _measureFromLabel[24];
     char _cartesianLabel[28];
+    char _splaysLabel[20];
 
     // State
     Adafruit_SH1107 *_display = nullptr;
@@ -96,5 +98,6 @@ class MenuManager {
     static void setMeasureFromFront(int);
     static void setMeasureFromBack(int);
     static void setCartesianTolerance(int value);
+    static void toggleSplays(int);
     static void exitMenu(int);
 };

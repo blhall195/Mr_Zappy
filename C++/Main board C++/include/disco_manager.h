@@ -30,7 +30,7 @@ class DiscoManager {
     void turnOff();
 
     // ── Animated effects ────────────────────────────────────────────
-    void startDisco();
+    void turnOn();
     void setPurple(); // starts purple pulse
 
     // ── State queries ───────────────────────────────────────────────

@@ -221,6 +221,7 @@ bool ConfigManager::loadConfig(Config &cfg) {
     cfg.laserWibble = doc["laser_wibble"] | Defaults::laserWibble;
     cfg.measureFromFront = doc["measure_from_front"] | Defaults::measureFromFront;
     cfg.screenBrightness = doc["screen_brightness"] | (int)Defaults::screenBrightness;
+    cfg.splaysEnabled = doc["splays_enabled"] | Defaults::splaysEnabled;
 
     const char *rawName = doc["ble_name"] | Defaults::bleName;
     // Strip SAP6_ prefix if user included it — we always prepend it ourselves
@@ -266,6 +267,7 @@ bool ConfigManager::saveConfig(const Config &cfg) {
     doc["laser_wibble"] = cfg.laserWibble;
     doc["measure_from_front"] = cfg.measureFromFront;
     doc["screen_brightness"] = (int)cfg.screenBrightness;
+    doc["splays_enabled"] = cfg.splaysEnabled;
     // Save only the user portion — SAP6_ prefix is always auto-prepended on load
     const char *nameToSave = (strncmp(cfg.bleName, "SAP6_", 5) == 0) ? cfg.bleName + 5 : cfg.bleName;
     doc["ble_name"] = nameToSave;

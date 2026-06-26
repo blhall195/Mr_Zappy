@@ -8,7 +8,7 @@ constexpr float gravTolerance = 10.0f; // degrees
 constexpr float dipTolerance = 10.0f;  // degrees
 constexpr bool anomalyDetection = true;
 constexpr float stabilityTolerance = 0.5f;    // degrees
-constexpr float quickShotStabilityTol = 3.0f; // degrees (wider for splay shots)
+constexpr float quickShotStabilityTol = 8.0f; // degrees (wider for splay shots)
 constexpr uint8_t stabilityBufferLength = 5;
 constexpr float emaAlphaStable = 0.05f;         // low alpha when stationary (max smoothing)
 constexpr float emaAlphaMoving = 0.6f;          // high alpha when moving (responsive)
@@ -33,6 +33,7 @@ constexpr uint32_t autoShutdownTimeout = 1800; // seconds (30 min)
 constexpr uint32_t laserTimeout = 120;         // seconds (2 min)
 constexpr bool laserWibble = true;             // blink laser on leg detect
 constexpr bool measureFromFront = false;       // false = Back (add offset), true = Front (raw laser)
+constexpr bool splaysEnabled = false;          // enable splay shots on button 2 short press
 constexpr uint8_t screenBrightness = 255;      // OLED contrast 0-255
 constexpr char bleName[] = "SAP6_Unicorn";
 constexpr uint8_t bleNameMaxLen = 20; // max chars for BLE name
@@ -52,7 +53,7 @@ constexpr uint32_t DISPLAY_REFRESH_MS = 250; // 4 Hz display updates
 constexpr uint32_t LOOP_INTERVAL_MS = 10;    // main loop pace
 constexpr float BATTERY_SHUTDOWN_PCT = 5.0f;
 constexpr uint32_t CALIB_HOLD_MS = 1000;    // 1s hold for menu
-constexpr uint32_t DISCO_HOLD_MS = 2000;    // 2s hold for disco toggle
+constexpr uint32_t DISCO_HOLD_MS = 1500;    // 2s hold for disco toggle
 constexpr uint32_t SNAKE_HOLD_MS = 5000;    // 5s hold for snake
 constexpr uint32_t MEASURE_GUARD_MS = 1500; // post-measure lockout
 } // namespace Timing

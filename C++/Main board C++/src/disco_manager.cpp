@@ -97,7 +97,7 @@ void DiscoManager::turnOff() { stopAll(); }
 
 // ── Animated effects ────────────────────────────────────────────────
 
-void DiscoManager::startDisco() {
+void DiscoManager::turnOn() {
     if (effect_ == DiscoEffect::DISCO) {
         return; // already running
     }
