@@ -13,22 +13,43 @@ def git(*args):
 
 
 try:
-    # Reachable tag exists — use it as-is (e.g. "v1.2", "v1.2-3-gabcdef-dirty")
-    version = git("describe", "--tags", "--dirty")
-except (subprocess.CalledProcessError, FileNotFoundError):
+    dirty = bool(git("status", "--porcelain"))
+
     try:
-        commit_hash = git("rev-parse", "--short", "HEAD")
-        dirty = bool(git("status", "--porcelain"))
+        # HEAD is exactly a tagged commit — the tag alone identifies it,
+        # so neither the date nor the hash add anything.
+        tag = git("describe", "--tags", "--exact-match")
+        exact = True
+    except subprocess.CalledProcessError:
+        try:
+            tag = git("describe", "--tags", "--abbrev=0")
+        except subprocess.CalledProcessError:
+            tag = None
+        exact = False
+
+    if exact and not dirty:
+        # Clean checkout of a tagged commit — the tag alone identifies it.
+        parts = [tag]
+    else:
         if dirty:
-            # Working tree has uncommitted changes — commit date is misleading,
-            # so prefix with today's build date instead.
-            prefix = datetime.date.today().strftime("%Y%m%d")
-            version = "%s-%s-dirty" % (prefix, commit_hash)
+            # Uncommitted changes — commit date would be misleading, so use
+            # today's build date instead.
+            date = datetime.date.today().strftime("%Y%m%d")
         else:
-            commit_date = git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", "HEAD")
-            version = "%s-%s" % (commit_date, commit_hash)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        version = "unknown"
+            date = git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", "HEAD")
+
+        parts = [date]
+        if tag:
+            parts.append(tag)
+        if not exact:
+            # Hash is redundant once the tag pins down the exact commit.
+            parts.append(git("rev-parse", "--short", "HEAD"))
+
+    version = "-".join(parts)
+    if dirty:
+        version += "-dirty"
+except (subprocess.CalledProcessError, FileNotFoundError):
+    version = "unknown"
 
 print("Firmware version: %s" % version)
 
