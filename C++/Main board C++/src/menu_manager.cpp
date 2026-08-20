@@ -119,7 +119,7 @@ void MenuManager::buildMenu() {
     snprintf(_measureFromLabel, sizeof(_measureFromLabel), "Measure from: %s",
              _ctx->config.measureFromFront ? "Front" : "Back");
 
-    snprintf(_firmwareLabel, sizeof(_firmwareLabel), "Current FW: %s", FIRMWARE_VERSION);
+    snprintf(_firmwareLabel, sizeof(_firmwareLabel), "%s", FIRMWARE_VERSION);
 
     // ── Initialize all menus ─────────────────────────────────────
     _root.init(*_display, "Main Menu");
@@ -131,7 +131,7 @@ void MenuManager::buildMenu() {
     _brightnessSub.init(*_display, _brightnessLabel);
     _settingsSub.init(*_display, "Settings");
     _firmwareSub.init(*_display, "Update Firmware");
-    _firmwareSub.setSubtitle(_firmwareLabel);
+    _firmwareSub.setSubtitle("Current FW:", _firmwareLabel);
     _measureFromSub.init(*_display, _measureFromLabel);
     _reformatSub.init(*_display, "Reformat (via USB)");
     _cartesianSub.init(*_display, _cartesianLabel);
