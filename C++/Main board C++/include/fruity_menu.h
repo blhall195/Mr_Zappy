@@ -21,6 +21,11 @@ class FruityMenu {
     // Title pointer must remain valid for the menu's lifetime.
     void init(Adafruit_SH1107 &display, const char *title);
 
+    // Optional line of text drawn below the title bar, above the item
+    // list. Pointer must remain valid for the menu's lifetime. Pass
+    // nullptr to remove it.
+    void setSubtitle(const char *subtitle);
+
     // Clear all items and reset selection (for rebuild)
     void clear();
 
@@ -50,6 +55,7 @@ class FruityMenu {
 
     Adafruit_SH1107 *_display = nullptr;
     const char *_title = nullptr;
+    const char *_subtitle = nullptr;
     FruityMenuItem _items[MAX_ITEMS] = {};
     uint8_t _count = 0;
     uint8_t _selection = 0;

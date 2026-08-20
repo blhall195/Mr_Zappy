@@ -1,5 +1,6 @@
 #include "menu_manager.h"
 #include "config.h"
+#include "firmware_version.h"
 
 MenuManager *MenuManager::s_instance = nullptr;
 
@@ -118,6 +119,8 @@ void MenuManager::buildMenu() {
     snprintf(_measureFromLabel, sizeof(_measureFromLabel), "Measure from: %s",
              _ctx->config.measureFromFront ? "Front" : "Back");
 
+    snprintf(_firmwareLabel, sizeof(_firmwareLabel), "Current FW: %s", FIRMWARE_VERSION);
+
     // ── Initialize all menus ─────────────────────────────────────
     _root.init(*_display, "Main Menu");
     _calSub.init(*_display, "Enter Calibration");
@@ -128,6 +131,7 @@ void MenuManager::buildMenu() {
     _brightnessSub.init(*_display, _brightnessLabel);
     _settingsSub.init(*_display, "Settings");
     _firmwareSub.init(*_display, "Update Firmware");
+    _firmwareSub.setSubtitle(_firmwareLabel);
     _measureFromSub.init(*_display, _measureFromLabel);
     _reformatSub.init(*_display, "Reformat (via USB)");
     _cartesianSub.init(*_display, _cartesianLabel);
