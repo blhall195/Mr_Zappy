@@ -6,6 +6,11 @@ void FruityMenu::init(Adafruit_SH1107 &display, const char *title) {
     clear();
 }
 
+void FruityMenu::setSubtitle(const char *line1, const char *line2) {
+    _subtitle = line1;
+    _subtitle2 = line2;
+}
+
 void FruityMenu::clear() {
     _count = 0;
     _selection = 0;
@@ -106,6 +111,20 @@ void FruityMenu::render() {
     _display->setCursor(TEXT_X, y + TEXT_Y_PAD);
     _display->print(_title);
     y += PX_PER_LINE;
+
+    // Subtitle lines — plain text, not selectable
+    if (_subtitle) {
+        _display->setTextColor(SH110X_WHITE);
+        _display->setCursor(TEXT_X, y + TEXT_Y_PAD);
+        _display->print(_subtitle);
+        y += PX_PER_LINE;
+    }
+    if (_subtitle2) {
+        _display->setTextColor(SH110X_WHITE);
+        _display->setCursor(TEXT_X, y + TEXT_Y_PAD);
+        _display->print(_subtitle2);
+        y += PX_PER_LINE;
+    }
 
     // Calculate pagination
     uint8_t maxVisible = (DISPLAY_H - y) / PX_PER_LINE;

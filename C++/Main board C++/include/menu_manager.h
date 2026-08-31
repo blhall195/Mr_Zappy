@@ -63,6 +63,7 @@ class MenuManager {
     char _measureFromLabel[24];
     char _cartesianLabel[28];
     char _splaysLabel[20];
+    char _firmwareLabel[32];
 
     // State
     Adafruit_SH1107 *_display = nullptr;
