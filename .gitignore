@@ -1,4 +1,5 @@
 /build
+/C++/Main board C++/include/firmware_version.h
 
 .DS_Store
 .claude/settings.local.json
